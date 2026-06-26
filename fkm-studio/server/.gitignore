@@ -1,0 +1,9 @@
+node_modules
+dist
+data/state.json
+.env
+
+# Script kiểm thử tạm (mock fetch, không gọi mạng thật) cho luồng
+# function-calling AI — không phải code sản phẩm, không cần build/deploy.
+test-function-calling.mts
+test-e2e.mts

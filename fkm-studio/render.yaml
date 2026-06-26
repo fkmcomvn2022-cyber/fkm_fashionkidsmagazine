@@ -1,0 +1,17 @@
+# Deploy server FKM Studio lên Render (miễn phí).
+# Sau khi deploy xong, copy URL Render rồi chạy:
+#   npm run apk:prepare -- --url=https://YOUR-SERVICE.onrender.com
+services:
+  - type: web
+    name: fkm-studio-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm run start
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Các biến bí mật (FB_*, GEMINI_*, VAPID_*) — thêm trên Render Dashboard
+      # sau khi deploy Blueprint. Xem deploy/render-env.local.txt (npm run deploy:setup).

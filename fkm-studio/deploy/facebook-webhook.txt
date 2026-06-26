@@ -1,0 +1,12 @@
+=== WEBHOOK FACEBOOK (làm SAU khi Render deploy xong) ===
+
+1. Vào https://developers.facebook.com → App → Messenger → Webhooks
+2. Callback URL:
+   https://fkm-studio-server.onrender.com/webhook/facebook
+3. Verify Token (phải khớp FB_VERIFY_TOKEN trên Render):
+   fkm_xac_minh_2026
+4. Subscribe field: messages
+5. Page Subscriptions → chọn Trang Facebook → Subscribe
+
+Kiểm tra server sống:
+  curl https://fkm-studio-server.onrender.com/api/health
