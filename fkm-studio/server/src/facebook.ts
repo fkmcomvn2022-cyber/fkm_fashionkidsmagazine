@@ -73,7 +73,13 @@ export function findOrCreateCustomerByFacebookId(state: StateSnapshot, psid: str
   const existing = customers.find((c) => c.facebookId === psid);
   if (existing) return existing;
   const customer: CustomerShape = {
-    id: nextId("u", customers),
+    // Tiền tố "fbu" (không phải "u") CỐ Ý — khách mẫu có sẵn trong app dùng id
+    // "u1".."u7". Nếu dùng chung tiền tố "u", lần đầu server tạo khách Facebook
+    // mới (đặc biệt sau khi Render xóa sạch state.json lúc redeploy) sẽ ra đúng
+    // "u1" — trùng thẳng với khách mẫu "Nguyễn Thị Mai", khiến app tưởng đây là
+    // 1 bản cập nhật khách cũ chứ không phải khách mới (xem mergeRemoteCustomers
+    // ở src/data/customers.ts) — đây là lý do khách Facebook test "biến mất".
+    id: nextId("fbu", customers),
     name: "Khách Facebook",
     phone: "",
     facebookId: psid,
@@ -91,7 +97,12 @@ export function appendMessage(
 ): MessageShape {
   const messages = messagesOf(state);
   const message: MessageShape = {
-    id: nextId("m", messages),
+    // Tiền tố "fbm" (không phải "m") — cùng lý do với "fbu" ở
+    // findOrCreateCustomerByFacebookId phía trên: tin mẫu có sẵn trong app
+    // dùng id "m1".."m5", dùng chung tiền tố "m" sẽ trùng ID, app dedupe theo
+    // id sẽ âm thầm bỏ qua tin nhắn thật từ khách (xem mergeRemoteMessages ở
+    // src/data/messages.ts).
+    id: nextId("fbm", messages),
     customerId: input.customerId,
     channel: input.channel,
     fromCustomer: input.fromCustomer,
