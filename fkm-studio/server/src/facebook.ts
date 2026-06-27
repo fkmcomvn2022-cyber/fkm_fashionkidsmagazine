@@ -105,7 +105,19 @@ export async function findOrCreateCustomerByFacebookId(
 ): Promise<CustomerShape> {
   const customers = customersOf(state);
   const existing = customers.find((c) => c.facebookId === psid);
-  if (existing) return existing;
+  if (existing) {
+    // Khách đã tồn tại nhưng vẫn còn tên/avatar mặc định (vd. được tạo TRƯỚC
+    // khi có đoạn gọi Graph API lấy hồ sơ thật, hoặc lần tạo đầu Facebook từ
+    // chối lấy hồ sơ) — thử lấy lại mỗi khi khách nhắn tin tiếp, để tự "vá"
+    // dần, không bị kẹt vĩnh viễn với "Khách Facebook" như khách tạo trước
+    // bản fix này.
+    if (!existing.avatar || existing.name === "Khách Facebook") {
+      const profile = await fetchFacebookProfile(psid, pageAccessToken);
+      if (profile?.name) existing.name = profile.name;
+      if (profile?.avatar) existing.avatar = profile.avatar;
+    }
+    return existing;
+  }
   const profile = await fetchFacebookProfile(psid, pageAccessToken);
   const customer: CustomerShape = {
     // Tiền tố "fbu" (không phải "u") CỐ Ý — khách mẫu có sẵn trong app dùng id
