@@ -30,6 +30,7 @@ export interface ConceptShape {
   shortDesc?: string;
   description?: string;
   sampleImageUrls?: string[];
+  samplePhotosByAge?: { label?: string; urls?: string[] }[];
   packageSummary?: string;
   [key: string]: unknown;
 }

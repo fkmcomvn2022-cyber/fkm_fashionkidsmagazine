@@ -125,6 +125,11 @@ export function buildStudioContext(state: StateSnapshot): string {
       const lines = [`- ${name}: trẻ em ${fmt(c.priceChild)}đ, người lớn ${fmt(c.priceAdult)}đ${desc ? ` — ${desc}` : ""}`];
       if (c.packageSummary?.trim()) lines.push(`  Gói gồm: ${c.packageSummary.trim()}`);
       if (Array.isArray(c.sampleImageUrls) && c.sampleImageUrls.length > 0) lines.push(`  (Có ${c.sampleImageUrls.length} ảnh mẫu, dùng hàm send_concept_photos để gửi khách xem nếu khách hỏi/quan tâm)`);
+      const ageGroups = Array.isArray(c.samplePhotosByAge) ? c.samplePhotosByAge.filter((g) => g && Array.isArray(g.urls) && g.urls.length > 0) : [];
+      if (ageGroups.length > 0) {
+        const labels = ageGroups.map((g) => String(g.label ?? "")).filter(Boolean).join(", ");
+        lines.push(`  (Có ảnh mẫu riêng theo độ tuổi: ${labels} — nếu khách nói/đã từng nói rõ tuổi bé trong đoạn chat, truyền kèm childAge khi gọi send_concept_photos để gửi đúng nhóm tuổi đó, ĐỪNG hỏi lại tuổi nếu đã biết từ lịch sử chat)`);
+      }
       return lines.join("\n");
     });
 
@@ -201,6 +206,12 @@ const FUNCTION_SCHEMAS: Record<string, Record<string, unknown>> = {
     type: "OBJECT",
     properties: {
       conceptName: { type: "STRING", description: "Tên concept khách đang hỏi/quan tâm, để gửi đúng ảnh mẫu của concept đó" },
+      // Giai đoạn 7.1 — chỉ truyền khi concept đó CÓ khai báo nhóm ảnh theo độ
+      // tuổi (xem dòng "Có ảnh mẫu riêng theo độ tuổi" ở Thông tin studio).
+      // QUAN TRỌNG: lấy tuổi bé từ TOÀN BỘ lịch sử đoạn chat đã có (nếu khách
+      // từng nhắc trước đó), KHÔNG hỏi lại khách nếu đã biết, và KHÔNG tự hỏi
+      // thêm thông tin thừa không cần thiết khi khách chỉ hỏi ảnh mẫu.
+      childAge: { type: "STRING", description: "Tuổi bé/độ tuổi khách đang hỏi (vd '4', '4 tuổi', '3-5 tuổi') — chỉ cần khi concept có nhóm ảnh theo độ tuổi. Lấy từ chính câu khách vừa hỏi HOẶC từ lịch sử chat trước đó nếu khách đã từng nói tuổi bé, không hỏi lại." },
     },
     required: ["conceptName"],
   },
@@ -238,7 +249,7 @@ const FUNCTION_FALLBACK_DESCRIPTIONS: Record<string, string> = {
   escalate_to_staff: "Báo nhân viên thật vào hỗ trợ khi gặp câu hỏi ngoài khả năng trả lời.",
   check_available_slots: "Kiểm tra khung giờ còn trống thật của studio theo ngày khách hỏi, để trả lời đúng lịch trống, không bịa.",
   create_order_from_chat: "Tự tạo đơn hàng mới (trạng thái Chưa cọc) khi đã thu thập đủ họ tên, SĐT, ngày và giờ khách muốn chụp.",
-  send_concept_photos: "Gửi vài ảnh mẫu thật của 1 concept cho khách xem qua Facebook, khi khách hỏi có ảnh mẫu không hoặc đang cân nhắc giữa các concept.",
+  send_concept_photos: "Gửi vài ảnh mẫu thật của 1 concept cho khách xem qua Facebook, khi khách hỏi có ảnh mẫu không hoặc đang cân nhắc giữa các concept. Nếu concept có ảnh mẫu riêng theo độ tuổi và biết tuổi bé (khách vừa nói hoặc đã nói trước đó trong đoạn chat), truyền kèm childAge để gửi đúng nhóm tuổi — không hỏi lại tuổi nếu đã biết.",
   upsell_order: "Tự thêm dịch vụ bổ trợ hoặc thêm người vào đơn đang có của khách, sau khi khách đã đồng ý mua thêm — tự tính lại số tiền cần thu thêm.",
   reschedule_order: "Tự đổi ngày/giờ đơn đang có của khách, sau khi khách đã xác nhận muốn đổi sang ngày/giờ cụ thể — kiểm tra trùng giờ trước khi đổi.",
   cancel_order: "Tự hủy đơn đang có của khách, sau khi khách đã xác nhận rõ ràng muốn hủy lịch hẹn.",
@@ -351,11 +362,46 @@ async function handleCreateOrderFromChat(state: StateSnapshot, customer: Custome
   return result;
 }
 
+/** Bóc các số nguyên ra khỏi 1 nhãn nhóm tuổi tự do (vd "3-5 tuổi" -> [3, 5],
+ * "Sơ sinh" -> [], "6 tuổi" -> [6]) — dùng để so khớp gần nhất với tuổi khách hỏi. */
+function parseAgeNumbers(label: string): number[] {
+  const matches = label.match(/\d+/g);
+  return matches ? matches.map((m) => parseInt(m, 10)) : [];
+}
+
+/** Tìm nhóm ảnh theo độ tuổi khớp nhất với `childAge` khách hỏi (so khoảng
+ * cách tới [min,max] số tuổi bóc được từ nhãn nhóm) — nhóm nào không bóc được
+ * số (vd "Sơ sinh") thì bỏ qua khỏi việc so khoảng cách, không match theo số. */
+function matchAgeGroup(
+  groups: { label?: string; urls?: string[] }[],
+  childAgeRaw: string,
+): { label?: string; urls?: string[] } | undefined {
+  const valid = groups.filter((g) => Array.isArray(g.urls) && g.urls.length > 0);
+  if (valid.length === 0) return undefined;
+  const askedNums = parseAgeNumbers(childAgeRaw);
+  if (askedNums.length === 0) return valid[0];
+  const askedAge = askedNums[0];
+
+  let best: { group: { label?: string; urls?: string[] }; dist: number } | undefined;
+  for (const g of valid) {
+    const nums = parseAgeNumbers(g.label ?? "");
+    if (nums.length === 0) continue;
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+    const dist = askedAge < min ? min - askedAge : askedAge > max ? askedAge - max : 0;
+    if (!best || dist < best.dist) best = { group: g, dist };
+  }
+  return best?.group ?? valid[0];
+}
+
 /**
  * Tìm concept theo tên (khớp gần đúng, không phân biệt hoa thường) trong số
- * concept đang mở bán, gửi tối đa 4 ảnh mẫu đầu (`sampleImageUrls`) cho khách
- * qua Facebook Send API — cùng cách gửi ảnh QR đã có (`sendFacebookImage`).
- * Giới hạn 4 ảnh để không spam khách lúc đang chat.
+ * concept đang mở bán, gửi tối đa 4 ảnh mẫu cho khách qua Facebook Send API —
+ * cùng cách gửi ảnh QR đã có (`sendFacebookImage`). Giới hạn 4 ảnh để không
+ * spam khách lúc đang chat. Nếu khách hỏi kèm `childAge` VÀ concept có khai
+ * báo `samplePhotosByAge`, ưu tiên gửi đúng nhóm tuổi khớp nhất; nếu không có
+ * nhóm tuổi nào hoặc khách không nói tuổi, vẫn gửi `sampleImageUrls` chung như
+ * trước — không phá hành vi cũ.
  */
 async function handleSendConceptPhotos(state: StateSnapshot, customer: CustomerShape, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const wantedName = typeof args.conceptName === "string" ? args.conceptName.trim() : "";
@@ -368,7 +414,13 @@ async function handleSendConceptPhotos(state: StateSnapshot, customer: CustomerS
     concepts.find((c) => (c.name ?? "").toLowerCase().includes(needle) || needle.includes((c.name ?? "").toLowerCase()));
   if (!concept) return { ok: false, error: "concept_not_found" };
 
-  const urls = Array.isArray(concept.sampleImageUrls) ? concept.sampleImageUrls.filter((u) => typeof u === "string" && u.trim()).slice(0, 4) : [];
+  const childAge = typeof args.childAge === "string" ? args.childAge.trim() : "";
+  const ageGroups = Array.isArray(concept.samplePhotosByAge) ? concept.samplePhotosByAge : [];
+  const matchedGroup = childAge && ageGroups.length > 0 ? matchAgeGroup(ageGroups, childAge) : undefined;
+
+  const urls = (
+    matchedGroup?.urls ?? (Array.isArray(concept.sampleImageUrls) ? concept.sampleImageUrls : [])
+  ).filter((u): u is string => typeof u === "string" && !!u.trim()).slice(0, 4);
   if (urls.length === 0) return { ok: false, error: "no_sample_images", conceptName: concept.name };
   if (!customer.facebookId || !FB_PAGE_ACCESS_TOKEN) return { ok: false, error: "missing_facebook_channel", conceptName: concept.name };
 
@@ -377,7 +429,7 @@ async function handleSendConceptPhotos(state: StateSnapshot, customer: CustomerS
     const sent = await sendFacebookImage(customer.facebookId, url, FB_PAGE_ACCESS_TOKEN);
     if (sent.ok) sentCount++;
   }
-  return { ok: sentCount > 0, sentCount, conceptName: concept.name };
+  return { ok: sentCount > 0, sentCount, conceptName: concept.name, ageGroup: matchedGroup?.label };
 }
 
 async function handleUpsellOrder(state: StateSnapshot, customer: CustomerShape, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -731,6 +783,31 @@ async function runOpenAiCompatibleVisionText(
 
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+
+// 4 ô "chia cứng" giống UChat (persona/description/product/skill), thay cho 1
+// ô `customPrompt` tự do duy nhất trước đây — xem comment đầy đủ ở
+// src/lib/aiReply.ts (AiAutoReplySettings). Hàm này ghép cả 4 ô lại thành
+// đúng 1 đoạn text, dùng làm `customPrompt` gửi vào AiReplyContext/
+// ImageReplyContext bên dưới (KHÔNG đổi 2 interface đó, chỉ đổi NƠI tạo ra
+// giá trị customPrompt — index.ts gọi hàm này trước khi gọi generateAiReply/
+// generateImageReply). Nếu cả 4 ô đều trống (studio chưa từng cập nhật qua
+// giao diện mới), fallback dùng nguyên `customPrompt` cũ để KHÔNG mất hướng
+// dẫn studio đã gõ trước 2026-06-28.
+export function buildCombinedCustomPrompt(settings: {
+  customPrompt?: string;
+  personaPrompt?: string;
+  descriptionPrompt?: string;
+  productPrompt?: string;
+  skillPrompt?: string;
+}): string {
+  const sections: string[] = [];
+  if (settings.personaPrompt?.trim()) sections.push(`Vai trò/nhân cách AI:\n${settings.personaPrompt.trim()}`);
+  if (settings.descriptionPrompt?.trim()) sections.push(`Giới thiệu chung:\n${settings.descriptionPrompt.trim()}`);
+  if (settings.productPrompt?.trim()) sections.push(`Thông tin sản phẩm thêm:\n${settings.productPrompt.trim()}`);
+  if (settings.skillPrompt?.trim()) sections.push(`AI biết làm gì thêm:\n${settings.skillPrompt.trim()}`);
+  if (sections.length > 0) return sections.join("\n\n");
+  return settings.customPrompt?.trim() ?? "";
+}
 
 export interface AiReplyContext {
   state: StateSnapshot;

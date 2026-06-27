@@ -275,15 +275,50 @@ export default function AiSettingsPage() {
 
       <Panel
         title="Hướng dẫn thêm cho AI"
-        subtitle="Gõ tự do — vd phong cách trả lời, điều cần nhấn mạnh. Các quy tắc an toàn (không bịa giá, không tự chốt giờ) luôn được giữ, dù anh viết gì ở đây."
+        subtitle='Chia theo 4 ô riêng, giống cách cấu hình AI Agent ở UChat — gõ ô nào cũng được, để trống ô nào cũng không sao. Các quy tắc an toàn (không bịa giá, không tự chốt giờ) luôn được giữ, dù anh viết gì ở đây.'
       >
-        <textarea
-          value={settings.customPrompt}
-          onChange={(e) => save({ ...settings, customPrompt: e.target.value })}
-          placeholder='Vd: "Khách hỏi giá trẻ em thì luôn nhắc thêm có tặng 1 ảnh in. Trả lời ngắn, đừng dài dòng."'
-          rows={4}
-          className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
-        />
+        <div className="flex flex-col gap-3">
+          <div>
+            <p className="text-[12px] font-medium text-ink mb-1">Persona — Vai trò/nhân cách AI</p>
+            <textarea
+              value={settings.personaPrompt ?? ""}
+              onChange={(e) => save({ ...settings, personaPrompt: e.target.value })}
+              placeholder='Vd: "Em tên là Mi, lễ tân FKM Studio. Xưng em, gọi khách là anh/chị. Nói chuyện nhẹ nhàng, nhiệt tình."'
+              rows={2}
+              className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
+            />
+          </div>
+          <div>
+            <p className="text-[12px] font-medium text-ink mb-1">Description — Giới thiệu chung studio</p>
+            <textarea
+              value={settings.descriptionPrompt ?? ""}
+              onChange={(e) => save({ ...settings, descriptionPrompt: e.target.value })}
+              placeholder='Vd: "FKM Studio chuyên chụp ảnh kỷ yếu/gia đình tại Q.7, hoạt động từ 2018, có 3 phòng chụp."'
+              rows={2}
+              className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
+            />
+          </div>
+          <div>
+            <p className="text-[12px] font-medium text-ink mb-1">Product — Ghi thêm về sản phẩm</p>
+            <textarea
+              value={settings.productPrompt ?? ""}
+              onChange={(e) => save({ ...settings, productPrompt: e.target.value })}
+              placeholder='Vd: "Ngoài các concept đang mở, studio có bán thêm khung ảnh gỗ, giá 150k/khung." (thông tin sản phẩm thật trong Concept vẫn tự sinh riêng, không cần gõ lại ở đây)'
+              rows={2}
+              className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
+            />
+          </div>
+          <div>
+            <p className="text-[12px] font-medium text-ink mb-1">Skill — AI biết làm gì thêm</p>
+            <textarea
+              value={settings.skillPrompt ?? ""}
+              onChange={(e) => save({ ...settings, skillPrompt: e.target.value })}
+              placeholder='Vd: "Khách hỏi giá trẻ em thì luôn nhắc thêm có tặng 1 ảnh in. Trả lời ngắn, đừng dài dòng." (chỉ là hướng dẫn trả lời, không phải nghiệp vụ AI tự gọi — xem mục Function bên dưới)'
+              rows={2}
+              className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
+            />
+          </div>
+        </div>
       </Panel>
 
       <Panel

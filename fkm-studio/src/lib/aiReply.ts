@@ -38,7 +38,22 @@ export interface AiFunctionConfig {
 
 export interface AiAutoReplySettings {
   enabled: boolean;
+  // LEGACY (trước 2026-06-28) — 1 ô tự do duy nhất. Vẫn giữ field này để
+  // KHÔNG mất dữ liệu studio đã gõ trước đây; server tự dùng customPrompt làm
+  // fallback CHỈ KHI cả 4 ô structured dưới đây đều trống (xem
+  // buildCombinedCustomPrompt ở server/src/ai.ts). UI (AiSettingsPage) không
+  // còn hiện ô này nữa, chỉ hiện 4 ô structured.
   customPrompt: string;
+  // 4 ô "chia cứng" giống UChat (2026-06-28, theo yêu cầu anh) — mỗi ô 1 góc
+  // riêng, AI ghép lại thành 1 system prompt thay cho 1 ô tự do chung. Đều
+  // optional + tự do nội dung, KHÔNG đụng tới danh sách "functions" thật bên
+  // dưới (skillPrompt chỉ là mô tả thêm, không gọi hàm thật) và KHÔNG thay
+  // thế "Thông tin studio" tự sinh từ Concept/dịch vụ thật (productPrompt chỉ
+  // là ghi thêm thông tin sản phẩm KHÔNG có trong Concept).
+  personaPrompt?: string; // Vai trò/nhân cách AI — vd xưng hô, tính cách, phong cách nói chuyện
+  descriptionPrompt?: string; // Giới thiệu chung về studio/dịch vụ
+  productPrompt?: string; // Ghi thêm thông tin sản phẩm KHÔNG nằm trong dữ liệu Concept thật
+  skillPrompt?: string; // Mô tả tự do "AI biết làm gì" thêm — KHÔNG gọi hàm thật, chỉ là hướng dẫn trả lời
   functions: AiFunctionConfig[];
   // 2 cài đặt studio tự chỉnh trong app (2026-06-28), KHÔNG hardcode trong
   // code nữa — xem chỗ dùng thật ở server/src/ai.ts (AiReplyContext.historyWindow/

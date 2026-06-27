@@ -28,6 +28,7 @@ export function ConceptEditSheet({ concept, onClose }: ConceptEditSheetProps) {
   const [description, setDescription] = useState("");
   const [packageSummary, setPackageSummary] = useState("");
   const [sampleImageUrlsText, setSampleImageUrlsText] = useState("");
+  const [ageGroups, setAgeGroups] = useState<{ label: string; urlsText: string }[]>([]);
   const [defaultPhotoStaffId, setDefaultPhotoStaffId] = useState("");
   const [defaultMakeupStaffId, setDefaultMakeupStaffId] = useState("");
   const [defaultStylistStaffId, setDefaultStylistStaffId] = useState("");
@@ -47,6 +48,9 @@ export function ConceptEditSheet({ concept, onClose }: ConceptEditSheetProps) {
       setDescription(concept.description ?? "");
       setPackageSummary(concept.packageSummary ?? "");
       setSampleImageUrlsText((concept.sampleImageUrls ?? []).join("\n"));
+      setAgeGroups(
+        (concept.samplePhotosByAge ?? []).map((g) => ({ label: g.label ?? "", urlsText: (g.urls ?? []).join("\n") })),
+      );
       setDefaultPhotoStaffId(concept.defaultPhotoStaffId ?? "");
       setDefaultMakeupStaffId(concept.defaultMakeupStaffId ?? "");
       setDefaultStylistStaffId(concept.defaultStylistStaffId ?? "");
@@ -71,6 +75,9 @@ export function ConceptEditSheet({ concept, onClose }: ConceptEditSheetProps) {
       description: description.trim() || undefined,
       packageSummary: packageSummary.trim() || undefined,
       sampleImageUrls: sampleImageUrlsText.split("\n").map((s) => s.trim()).filter(Boolean),
+      samplePhotosByAge: ageGroups
+        .map((g) => ({ label: g.label.trim(), urls: g.urlsText.split("\n").map((s) => s.trim()).filter(Boolean) }))
+        .filter((g) => g.label && g.urls.length > 0),
       defaultPhotoStaffId: defaultPhotoStaffId || undefined,
       defaultMakeupStaffId: defaultMakeupStaffId || undefined,
       defaultStylistStaffId: defaultStylistStaffId || undefined,
@@ -145,6 +152,46 @@ export function ConceptEditSheet({ concept, onClose }: ConceptEditSheetProps) {
             placeholder={"https://...\nhttps://..."}
           />
         </Field>
+
+        <div>
+          <p className="text-xs font-medium text-ink-soft">Ảnh mẫu riêng theo độ tuổi (tuỳ chọn)</p>
+          <p className="text-[11px] text-muted mt-0.5">
+            Để AI gửi đúng ảnh khi khách hỏi tuổi bé cụ thể (vd "bé 4 tuổi"). Đặt tên khung tuổi tự do (vd "3-5 tuổi"), AI tự khớp gần nhất. Để trống hết = AI dùng ảnh mẫu chung ở trên.
+          </p>
+        </div>
+        {ageGroups.map((g, idx) => (
+          <div key={idx} className="rounded-2xl border border-border-soft bg-surface-soft p-3 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                className={inputClass}
+                value={g.label}
+                onChange={(e) => setAgeGroups((prev) => prev.map((it, i) => (i === idx ? { ...it, label: e.target.value } : it)))}
+                placeholder='Vd. "3-5 tuổi"'
+              />
+              <button
+                type="button"
+                onClick={() => setAgeGroups((prev) => prev.filter((_, i) => i !== idx))}
+                className="text-[12px] text-red-500 px-2 shrink-0"
+              >
+                Xóa
+              </button>
+            </div>
+            <textarea
+              className={inputClass}
+              rows={2}
+              value={g.urlsText}
+              onChange={(e) => setAgeGroups((prev) => prev.map((it, i) => (i === idx ? { ...it, urlsText: e.target.value } : it)))}
+              placeholder={"https://...\nhttps://..."}
+            />
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setAgeGroups((prev) => [...prev, { label: "", urlsText: "" }])}
+        >
+          + Thêm khung tuổi
+        </Button>
 
         <div className="h-px bg-border-soft my-0.5" />
 

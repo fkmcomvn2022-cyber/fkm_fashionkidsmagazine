@@ -116,7 +116,7 @@ export const conceptById = (id: string) => concepts.find((c) => c.id === id);
  * dữ liệu duy nhất cho màn Sản phẩm > Sửa concept. priceFrom tự cập nhật theo
  * min(priceChild, priceAdult) để badge "giá từ X" trên thẻ luôn đúng.
  */
-export function updateConcept(id: string, patch: Partial<Pick<Concept, "name" | "priceChild" | "priceAdult" | "durationMin" | "makeupMin" | "shortDesc" | "description" | "sampleImageUrls" | "packageSummary" | "defaultPhotoStaffId" | "defaultMakeupStaffId" | "defaultStylistStaffId" | "crewCostPhoto" | "crewCostMakeupChild" | "crewCostMakeupAdult" | "crewCostStylist" | "crewCostRetouchPerPerson">>): Concept | undefined {
+export function updateConcept(id: string, patch: Partial<Pick<Concept, "name" | "priceChild" | "priceAdult" | "durationMin" | "makeupMin" | "shortDesc" | "description" | "sampleImageUrls" | "samplePhotosByAge" | "packageSummary" | "defaultPhotoStaffId" | "defaultMakeupStaffId" | "defaultStylistStaffId" | "crewCostPhoto" | "crewCostMakeupChild" | "crewCostMakeupAdult" | "crewCostStylist" | "crewCostRetouchPerPerson">>): Concept | undefined {
   const concept = conceptById(id);
   if (!concept) return undefined;
   Object.assign(concept, patch);

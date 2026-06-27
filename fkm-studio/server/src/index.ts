@@ -22,6 +22,7 @@ import {
   verifyFacebookSignature,
 } from "./facebook.js";
 import {
+  buildCombinedCustomPrompt,
   buildStudioContext,
   classifyPaymentImage,
   generateAiReply,
@@ -353,7 +354,17 @@ async function handleIncomingImage(
   customer: { id?: string; facebookId?: string; name?: string },
   imageUrl: string,
   isAutomationEnabled: (key: string) => boolean,
-  aiSettings: { enabled?: boolean; customPrompt?: string; temperature?: number } | undefined,
+  aiSettings:
+    | {
+        enabled?: boolean;
+        customPrompt?: string;
+        personaPrompt?: string;
+        descriptionPrompt?: string;
+        productPrompt?: string;
+        skillPrompt?: string;
+        temperature?: number;
+      }
+    | undefined,
   FB_PAGE_ACCESS_TOKEN: string,
 ): Promise<void> {
   if (!customer.facebookId || !FB_PAGE_ACCESS_TOKEN) return;
@@ -393,7 +404,7 @@ async function handleIncomingImage(
         base64: img.base64,
         mimeType: img.mimeType,
         studioContext: buildStudioContext(state as never),
-        customPrompt: aiSettings.customPrompt,
+        customPrompt: buildCombinedCustomPrompt(aiSettings),
         temperature: aiSettings.temperature,
       });
       if (reply) {
@@ -444,6 +455,10 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
       | {
           enabled?: boolean;
           customPrompt?: string;
+          personaPrompt?: string;
+          descriptionPrompt?: string;
+          productPrompt?: string;
+          skillPrompt?: string;
           functions?: AiFunctionConfig[];
           historyWindow?: number;
           temperature?: number;
@@ -477,7 +492,7 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
           customer,
           history,
           studioContext: buildStudioContext(state),
-          customPrompt: aiSettings.customPrompt,
+          customPrompt: buildCombinedCustomPrompt(aiSettings),
           functions: aiSettings.functions ?? [],
           historyWindow: aiSettings.historyWindow,
           temperature: aiSettings.temperature,

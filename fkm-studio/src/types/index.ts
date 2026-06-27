@@ -25,6 +25,13 @@ export interface Concept {
   // lại studio "vậy giá đó có gồm trang điểm/ảnh in không").
   description?: string;
   sampleImageUrls?: string[];
+  // Giai đoạn 7.1 (xem [[fkm-studio-ai-chatbot-roadmap]]) — ảnh mẫu CHIA THEO
+  // ĐỘ TUỔI, để AI gửi đúng ảnh khi khách hỏi "bé 4 tuổi" chẳng hạn. `label`
+  // tự do (studio gõ "3-5 tuổi", "Sơ sinh", "6-9 tuổi"...) — server tự bóc số
+  // trong label để so khớp tuổi gần nhất khi gọi send_concept_photos. Để
+  // trống/không có nhóm nào = AI dùng `sampleImageUrls` chung như trước,
+  // KHÔNG bắt buộc phải cài cho mọi concept.
+  samplePhotosByAge?: { label: string; urls: string[] }[];
   packageSummary?: string;
   // Ekip mặc định cho concept này — tự điền vào đơn mới (QuickOrderForm) để
   // không phải gán lại từng đơn; vẫn sửa được riêng theo từng đơn khi ca đó
@@ -96,6 +103,11 @@ export interface Customer {
   // banner "Cần hỗ trợ" ở Hội thoại; tự tắt khi studio tự gửi 1 tin trả lời
   // tay cho khách này (xem POST /api/messages/send ở server/src/index.ts).
   needsHumanHelp?: boolean;
+  // Giai đoạn 7.2 — tạm dừng AI tự trả lời CHO RIÊNG khách này, dùng khi
+  // nhân viên tự tay gửi tin (xem POST /api/messages/send). Epoch ms; AI bị
+  // chặn khi Date.now() < aiPausedUntil, tự hết hiệu lực sau đó (không cần dọn
+  // field này, để vậy cũng không sao vì luôn so sánh với thời điểm hiện tại).
+  aiPausedUntil?: number;
 }
 
 export type OrderStatus =
