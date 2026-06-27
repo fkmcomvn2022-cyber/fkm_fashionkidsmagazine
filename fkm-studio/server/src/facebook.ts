@@ -52,16 +52,6 @@ function messagesOf(state: StateSnapshot): MessageShape[] {
   return state.messages as MessageShape[];
 }
 
-function nextId(prefix: string, list: { id?: string }[]): string {
-  let max = 0;
-  for (const item of list) {
-    if (!item.id?.startsWith(prefix)) continue;
-    const n = parseInt(item.id.slice(prefix.length), 10);
-    if (!Number.isNaN(n) && n > max) max = n;
-  }
-  return `${prefix}${max + 1}`;
-}
-
 /**
  * Lấy tên + ảnh đại diện thật của khách qua Graph API (Messenger Platform
  * User Profile API) — cần PSID + Page Access Token. Chỉ gọi được trong vòng
@@ -120,13 +110,24 @@ export async function findOrCreateCustomerByFacebookId(
   }
   const profile = await fetchFacebookProfile(psid, pageAccessToken);
   const customer: CustomerShape = {
-    // Tiền tố "fbu" (không phải "u") CỐ Ý — khách mẫu có sẵn trong app dùng id
-    // "u1".."u7". Nếu dùng chung tiền tố "u", lần đầu server tạo khách Facebook
-    // mới (đặc biệt sau khi Render xóa sạch state.json lúc redeploy) sẽ ra đúng
-    // "u1" — trùng thẳng với khách mẫu "Nguyễn Thị Mai", khiến app tưởng đây là
-    // 1 bản cập nhật khách cũ chứ không phải khách mới (xem mergeRemoteCustomers
-    // ở src/data/customers.ts) — đây là lý do khách Facebook test "biến mất".
-    id: nextId("fbu", customers),
+    // BUG (2026-06-28, vòng 2): trước đây dùng nextId("fbu", customers) — đếm
+    // tăng dần dựa trên DANH SÁCH KHÁCH HIỆN CÓ TRÊN SERVER. Nhưng Render free
+    // tier xóa sạch ổ đĩa mỗi lần redeploy -> customers rỗng -> bộ đếm RESET
+    // VỀ 1 -> khách Facebook mới đầu tiên sau redeploy lại ra đúng "fbu1" —
+    // trùng ID với 1 khách Facebook KHÁC mà app đã lưu trong localStorage từ
+    // TRƯỚC lúc redeploy (vì localStorage không bị xóa, chỉ ổ đĩa server bị
+    // xóa). App thấy ID trùng -> tưởng là khách cũ -> bỏ qua tin/khách mới,
+    // dù /api/chat-sync vẫn trả đúng dữ liệu (đây là lý do "log đúng, app vẫn
+    // không nhận tin", lặp lại nhiều lần dù đã đổi tiền tố "fbu"/"fbm" — đổi
+    // tiền tố chỉ tránh trùng với SEED tĩnh, không tránh được trùng với ID
+    // server tự sinh ở LẦN TRƯỚC).
+    //
+    // Fix triệt để: bỏ hẳn bộ đếm tăng dần, suy ID trực tiếp từ facebookId
+    // (PSID) — PSID không đổi vĩnh viễn cho 1 khách + 1 Trang, nên ID khách
+    // luôn giống nhau mỗi lần, không phụ thuộc server còn nhớ được bao nhiêu
+    // khách. Tác dụng phụ TỐT: nếu khách này nhắn lại sau khi server bị xóa
+    // ổ đĩa, vẫn nhận đúng là "khách cũ" (đúng bản chất), không tạo bản trùng.
+    id: `fbu_${psid}`,
     name: profile?.name || "Khách Facebook",
     phone: "",
     avatar: profile?.avatar,
@@ -145,12 +146,13 @@ export function appendMessage(
 ): MessageShape {
   const messages = messagesOf(state);
   const message: MessageShape = {
-    // Tiền tố "fbm" (không phải "m") — cùng lý do với "fbu" ở
-    // findOrCreateCustomerByFacebookId phía trên: tin mẫu có sẵn trong app
-    // dùng id "m1".."m5", dùng chung tiền tố "m" sẽ trùng ID, app dedupe theo
-    // id sẽ âm thầm bỏ qua tin nhắn thật từ khách (xem mergeRemoteMessages ở
-    // src/data/messages.ts).
-    id: nextId("fbm", messages),
+    // Tin nhắn thì không có gì ổn định để suy ID như facebookId của khách (1
+    // khách có thể nhắn nhiều tin), nên dùng crypto.randomUUID() — không phụ
+    // thuộc bộ đếm/độ dài danh sách hiện có trên server, do đó không bao giờ
+    // trùng dù server bị Render xóa ổ đĩa bao nhiêu lần (xem comment dài ở
+    // findOrCreateCustomerByFacebookId phía trên — cùng 1 lớp bug, ID sinh từ
+    // bộ đếm tăng dần trên dữ liệu CÓ THỂ MẤT).
+    id: `fbm_${crypto.randomUUID()}`,
     customerId: input.customerId,
     channel: input.channel,
     fromCustomer: input.fromCustomer,
