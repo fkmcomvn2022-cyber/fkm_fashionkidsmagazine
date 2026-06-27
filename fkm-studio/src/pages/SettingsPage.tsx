@@ -12,6 +12,7 @@ import { banks } from "@/data/banks";
 import { useAppState } from "@/lib/appState";
 import { isNativePlatform } from "@/lib/platform";
 import { BACKEND_URL } from "@/lib/persistence";
+import { fetchFbConfig } from "@/lib/fbConfig";
 
 const PUSH_STATE_DESC: Record<PushSupportState, string> = {
   unsupported: "Trình duyệt này không hỗ trợ thông báo đẩy",
@@ -46,7 +47,15 @@ function Row({ icon, label, desc, right }: { icon: React.ReactNode; label: strin
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const [fbConnected, setFbConnected] = useState(true);
+  // Trước đây là 1 boolean local tự bấm, KHÔNG phản ánh thật có Page Access
+  // Token đang dùng hay không (anh có thể bấm "đã kết nối" dù chưa cấu hình
+  // gì). Giờ đọc thật từ /api/fb-config (xem fbConfig.ts) — null = đang tải.
+  const [fbConnected, setFbConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetchFbConfig()
+      .then((c) => setFbConnected(c.hasPageAccessToken))
+      .catch(() => setFbConnected(false));
+  }, []);
   // Giai đoạn 3 — cờ này được mirror lên backend (xem persistAll trong
   // persistence.ts); server (server/src/index.ts) đọc lại đúng cờ này mỗi
   // lần có tin khách nhắn vào để quyết định có tự trả lời hay không.
@@ -147,12 +156,28 @@ export default function SettingsPage() {
 
       <Panel title="Kết nối">
         <div className="flex flex-col divide-y divide-border-soft">
-          <Row
-            icon={<MessageCircle size={16} />}
-            label="Facebook Messenger"
-            desc={fbConnected ? "Đã kết nối Fanpage FKM Studio" : "Chưa kết nối"}
-            right={<Toggle checked={fbConnected} onChange={() => setFbConnected((v) => !v)} />}
-          />
+          {isNativePlatform() ? (
+            <Row
+              icon={<MessageCircle size={16} />}
+              label="Facebook Messenger"
+              desc={fbConnected === null ? "Đang kiểm tra..." : fbConnected ? "Đã có Page Access Token" : "Chưa cấu hình"}
+              right={<span className="text-[11px] text-muted">{fbConnected ? "Đã kết nối" : "Chưa kết nối"}</span>}
+            />
+          ) : (
+            <button onClick={() => navigate("/settings/facebook")} className="w-full text-left">
+              <Row
+                icon={<MessageCircle size={16} />}
+                label="Facebook Messenger"
+                desc={
+                  fbConnected === null
+                    ? "Đang kiểm tra..."
+                    : fbConnected
+                      ? "Đã có Page Access Token — bấm để xem/đổi"
+                      : "Chưa cấu hình — bấm để nhập Page Access Token/App Secret"
+                }
+              />
+            </button>
+          )}
           <Row
             icon={<Bot size={16} />}
             label="AI tự động trả lời khách"

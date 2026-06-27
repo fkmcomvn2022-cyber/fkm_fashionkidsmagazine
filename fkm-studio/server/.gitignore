@@ -2,6 +2,7 @@ node_modules
 dist
 data/state.json
 data/ai-providers.json
+data/fb-config.json
 .env
 
 # Script kiểm thử tạm (mock fetch, không gọi mạng thật) cho luồng

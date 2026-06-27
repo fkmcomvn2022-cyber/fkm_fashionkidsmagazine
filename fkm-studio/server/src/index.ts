@@ -23,15 +23,18 @@ import {
 } from "./facebook.js";
 import { buildStudioContext, classifyPaymentImage, generateAiReply, generateImageReply, type AiFunctionConfig, type ChatTurn } from "./ai.js";
 import { getMaskedProviders, reorderProviders, updateProviders, type AiProviderKey, type AiProviderPatch } from "./aiProviders.js";
+import { getEffectiveFbConfig, getMaskedFbConfig, updateFbConfig, type FbConfigPatch } from "./fbConfig.js";
 import { confirmDepositFromScreenshot } from "./chatOrders.js";
 import { runAutomationCron } from "./automationCron.js";
 import { generateAssistantReply, type AssistantTurn } from "./assistant.js";
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
-const FB_VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN ?? "";
-const FB_APP_SECRET = process.env.FB_APP_SECRET ?? "";
-const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN ?? "";
+// FB_VERIFY_TOKEN/FB_APP_SECRET/FB_PAGE_ACCESS_TOKEN KHÔNG còn đọc 1 lần ở
+// đây nữa — giờ đọc động qua getEffectiveFbConfig() mỗi lần cần (xem
+// fbConfig.ts), vì studio có thể nhập/đổi qua UI Cài đặt bất kỳ lúc nào mà
+// không cần redeploy lại server. Biến môi trường Render cũ vẫn là mặc định
+// ngầm nếu studio chưa nhập gì qua UI.
 
 app.use(cors());
 app.use(
@@ -168,6 +171,24 @@ app.put("/api/ai-providers", async (req, res) => {
   }
 });
 
+// Cấu hình kết nối Facebook Messenger (Verify Token/App Secret/Page Access
+// Token/Page ID) nhập trực tiếp trong app, thay cho cách cũ phải vào Render
+// Dashboard đặt biến môi trường (xem fbConfig.ts đầu file để biết đầy đủ lý
+// do bảo mật — tách hẳn khỏi state.json công khai, giống pattern key AI).
+app.get("/api/fb-config", async (_req, res) => {
+  res.json(await getMaskedFbConfig());
+});
+
+app.put("/api/fb-config", async (req, res) => {
+  try {
+    await updateFbConfig((req.body ?? {}) as FbConfigPatch);
+    res.json({ ok: true, config: await getMaskedFbConfig() });
+  } catch (err) {
+    console.error("[fb-config] Không lưu được cấu hình:", err);
+    res.status(500).json({ ok: false, error: "write_failed" });
+  }
+});
+
 // Giai đoạn 8 (xem [[fkm-studio-ai-chatbot-roadmap]]) — trợ lý AI NỘI BỘ cho
 // chủ studio (xem assistant.ts). CHỈ ĐỌC state, không ghi gì lại — không cần
 // writeState() sau khi xử lý, khác hẳn các route AI khách hàng ở trên.
@@ -241,10 +262,11 @@ app.post("/api/orders/:id/photo-selection", async (req, res) => {
 // Meta gọi GET này 1 LẦN DUY NHẤT khi anh khai báo webhook trên Meta for
 // Developers (mục Messenger > Webhooks) — để xác minh server đúng là của
 // mình trước khi Meta bắt đầu gửi tin nhắn thật vào.
-app.get("/webhook/facebook", (req, res) => {
+app.get("/webhook/facebook", async (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
+  const { verifyToken: FB_VERIFY_TOKEN } = await getEffectiveFbConfig();
   const ok = mode === "subscribe" && FB_VERIFY_TOKEN && token === FB_VERIFY_TOKEN;
   console.log(`[facebook webhook] Meta xác minh webhook (GET) — mode=${mode} tokenKhớp=${token === FB_VERIFY_TOKEN} => ${ok ? "OK 200" : "TỪ CHỐI 403"}`);
   if (ok) {
@@ -254,16 +276,17 @@ app.get("/webhook/facebook", (req, res) => {
   }
 });
 
-app.post("/webhook/facebook", (req, res) => {
+app.post("/webhook/facebook", async (req, res) => {
   console.log("[facebook webhook] Nhận được 1 request POST từ Facebook");
   const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+  const { appSecret: FB_APP_SECRET } = await getEffectiveFbConfig();
   if (!FB_APP_SECRET) {
-    console.error("[facebook webhook] TỪ CHỐI 401 — thiếu biến môi trường FB_APP_SECRET trên server");
+    console.error("[facebook webhook] TỪ CHỐI 401 — thiếu App Secret (chưa nhập ở Cài đặt và cũng chưa đặt FB_APP_SECRET trên Render)");
     res.sendStatus(401);
     return;
   }
   if (!rawBody || !verifyFacebookSignature(rawBody, req.get("x-hub-signature-256"), FB_APP_SECRET)) {
-    console.error("[facebook webhook] TỪ CHỐI 401 — chữ ký x-hub-signature-256 không khớp FB_APP_SECRET (có thể App Secret trên Render không đúng với App đang gửi webhook)");
+    console.error("[facebook webhook] TỪ CHỐI 401 — chữ ký x-hub-signature-256 không khớp App Secret hiện tại (có thể App Secret đã nhập không đúng với App đang gửi webhook)");
     res.sendStatus(401);
     return;
   }
@@ -295,6 +318,7 @@ async function handleIncomingImage(
   imageUrl: string,
   isAutomationEnabled: (key: string) => boolean,
   aiSettings: { enabled?: boolean; customPrompt?: string } | undefined,
+  FB_PAGE_ACCESS_TOKEN: string,
 ): Promise<void> {
   if (!customer.facebookId || !FB_PAGE_ACCESS_TOKEN) return;
   const img = await fetchImageAsBase64(imageUrl);
@@ -351,6 +375,7 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
   const incoming = parseFacebookWebhookPayload(body);
   if (incoming.length === 0) return;
 
+  const { pageAccessToken: FB_PAGE_ACCESS_TOKEN } = await getEffectiveFbConfig();
   const state = (await readState()) ?? {};
   const automationRules = Array.isArray((state.automationSettings as { rules?: unknown })?.rules)
     ? ((state.automationSettings as { rules: { key: string; enabled: boolean }[] }).rules)
@@ -389,7 +414,7 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
     // trả lời tự nhiên), KHÔNG đi qua nhánh trả lời chữ bên dưới (tránh gọi
     // Gemini 2 lần cho cùng 1 tin nhắn).
     if (hasImage) {
-      await handleIncomingImage(state, customer, msg.attachmentUrls[0], isAutomationEnabled, aiSettings);
+      await handleIncomingImage(state, customer, msg.attachmentUrls[0], isAutomationEnabled, aiSettings, FB_PAGE_ACCESS_TOKEN);
       continue;
     }
 
@@ -460,6 +485,7 @@ app.post("/api/messages/send", async (req, res) => {
     res.status(400).json({ ok: false, error: "no_facebook_id" });
     return;
   }
+  const { pageAccessToken: FB_PAGE_ACCESS_TOKEN } = await getEffectiveFbConfig();
   if (!FB_PAGE_ACCESS_TOKEN) {
     res.status(500).json({ ok: false, error: "missing_page_access_token" });
     return;
