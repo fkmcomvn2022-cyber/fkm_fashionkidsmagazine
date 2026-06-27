@@ -186,7 +186,9 @@ app.get("/webhook/facebook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-  if (mode === "subscribe" && FB_VERIFY_TOKEN && token === FB_VERIFY_TOKEN) {
+  const ok = mode === "subscribe" && FB_VERIFY_TOKEN && token === FB_VERIFY_TOKEN;
+  console.log(`[facebook webhook] Meta xác minh webhook (GET) — mode=${mode} tokenKhớp=${token === FB_VERIFY_TOKEN} => ${ok ? "OK 200" : "TỪ CHỐI 403"}`);
+  if (ok) {
     res.status(200).send(challenge);
   } else {
     res.sendStatus(403);
@@ -194,16 +196,26 @@ app.get("/webhook/facebook", (req, res) => {
 });
 
 app.post("/webhook/facebook", (req, res) => {
+  console.log("[facebook webhook] Nhận được 1 request POST từ Facebook");
   const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
-  if (!rawBody || !verifyFacebookSignature(rawBody, req.get("x-hub-signature-256"), FB_APP_SECRET)) {
+  if (!FB_APP_SECRET) {
+    console.error("[facebook webhook] TỪ CHỐI 401 — thiếu biến môi trường FB_APP_SECRET trên server");
     res.sendStatus(401);
     return;
   }
+  if (!rawBody || !verifyFacebookSignature(rawBody, req.get("x-hub-signature-256"), FB_APP_SECRET)) {
+    console.error("[facebook webhook] TỪ CHỐI 401 — chữ ký x-hub-signature-256 không khớp FB_APP_SECRET (có thể App Secret trên Render không đúng với App đang gửi webhook)");
+    res.sendStatus(401);
+    return;
+  }
+  console.log("[facebook webhook] Chữ ký hợp lệ — đang xử lý payload");
   // Facebook yêu cầu phản hồi 200 trong vài giây, không chờ xử lý xong mới trả lời.
   res.sendStatus(200);
-  handleFacebookWebhookPayload(req.body).catch((err) => {
-    console.error("[facebook webhook] Lỗi xử lý payload:", err);
-  });
+  handleFacebookWebhookPayload(req.body)
+    .then(() => console.log("[facebook webhook] Xử lý payload xong, đã ghi vào state"))
+    .catch((err) => {
+      console.error("[facebook webhook] Lỗi xử lý payload:", err);
+    });
 });
 
 /**

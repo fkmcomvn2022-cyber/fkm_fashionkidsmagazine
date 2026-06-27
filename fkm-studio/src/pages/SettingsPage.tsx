@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, MessageCircle, Bot, Wallet, Bell, BellRing, Smartphone, ChevronRight, LogOut, Clock, CalendarClock, Wand2, Workflow } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bot, Wallet, Bell, BellRing, Smartphone, ChevronRight, LogOut, Clock, CalendarClock, Wand2, Workflow, Globe, Copy, Check } from "lucide-react";
 import { Panel } from "@/components/ui/Card";
 import { breakWindowSettings, setBreakWindowSettings, type BreakWindowSetting } from "@/lib/scheduling";
 import { vietQRSettings, setVietQRSettings, isVietQRConfigured, type VietQRSettings } from "@/lib/payments";
@@ -11,6 +11,7 @@ import { VietQRImage } from "@/components/VietQRImage";
 import { banks } from "@/data/banks";
 import { useAppState } from "@/lib/appState";
 import { isNativePlatform } from "@/lib/platform";
+import { BACKEND_URL } from "@/lib/persistence";
 
 const PUSH_STATE_DESC: Record<PushSupportState, string> = {
   unsupported: "Trình duyệt này không hỗ trợ thông báo đẩy",
@@ -56,7 +57,14 @@ export default function SettingsPage() {
   const [breaks, setBreaks] = useState<BreakWindowSetting[]>(breakWindowSettings);
   const [qr, setQr] = useState<VietQRSettings>(vietQRSettings);
   const [reminders, setReminders] = useState<ReminderSettings>(reminderSettings);
+  const [backendUrlCopied, setBackendUrlCopied] = useState(false);
   const { bumpDataVersion } = useAppState();
+
+  const handleCopyBackendUrl = () => {
+    navigator.clipboard?.writeText(BACKEND_URL).catch(() => {});
+    setBackendUrlCopied(true);
+    setTimeout(() => setBackendUrlCopied(false), 1500);
+  };
 
   // Đọc trạng thái thông báo đẩy thật (đã đăng ký service worker + subscribe
   // chưa) ngay khi vào màn Thiết lập — không suy đoán từ 1 biến local nữa.
@@ -298,6 +306,23 @@ export default function SettingsPage() {
             </button>
           )}
           <Row icon={<Smartphone size={16} />} label="Phiên bản ứng dụng" desc="FKM Studio v2.0.0 (Web App)" right={<span className="text-[11px] text-muted">Mới nhất</span>} />
+          <button
+            onClick={handleCopyBackendUrl}
+            className="flex items-center gap-3 py-2.5 text-left"
+          >
+            <span className="w-9 h-9 rounded-xl bg-surface-soft text-ink-soft flex items-center justify-center shrink-0">
+              <Globe size={16} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium text-ink">Server kết nối (Render)</p>
+              <p className="text-[11px] text-muted mt-0.5 truncate">{BACKEND_URL}</p>
+            </div>
+            {backendUrlCopied ? (
+              <Check size={15} className="text-success shrink-0" />
+            ) : (
+              <Copy size={15} className="text-muted shrink-0" />
+            )}
+          </button>
         </div>
       </Panel>
 
