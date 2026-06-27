@@ -21,6 +21,7 @@ interface CustomerShape {
   id?: string;
   name?: string;
   phone?: string;
+  avatar?: string;
   facebookId?: string;
   tag?: string;
   totalOrders?: number;
@@ -62,16 +63,50 @@ function nextId(prefix: string, list: { id?: string }[]): string {
 }
 
 /**
+ * Lấy tên + ảnh đại diện thật của khách qua Graph API (Messenger Platform
+ * User Profile API) — cần PSID + Page Access Token. Chỉ gọi được trong vòng
+ * Facebook cho phép (khách đã từng nhắn cho Trang); nếu Facebook từ chối
+ * (hết quyền app review, token sai...) thì trả về null và phía gọi tự fallback
+ * về tên mặc định "Khách Facebook" — không để lỗi này làm rớt cả webhook.
+ */
+async function fetchFacebookProfile(
+  psid: string,
+  pageAccessToken: string,
+): Promise<{ name?: string; avatar?: string } | null> {
+  if (!pageAccessToken) return null;
+  try {
+    const url = `https://graph.facebook.com/v19.0/${psid}?fields=first_name,last_name,profile_pic&access_token=${encodeURIComponent(pageAccessToken)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn("[facebook] Không lấy được thông tin khách (PSID", psid, "):", await res.text());
+      return null;
+    }
+    const data = (await res.json()) as { first_name?: string; last_name?: string; profile_pic?: string };
+    const name = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
+    return { name: name || undefined, avatar: data.profile_pic };
+  } catch (err) {
+    console.warn("[facebook] Lỗi khi lấy thông tin khách:", err);
+    return null;
+  }
+}
+
+/**
  * Tìm khách theo facebookId (PSID — Page-Scoped ID Facebook gửi kèm mỗi tin)
- * — chưa có thì tạo mới (tag "Mới"). Tương đương `findOrCreateCustomer` ở
+ * — chưa có thì tạo mới (tag "Mới"), kèm gọi Graph API lấy tên + avatar thật
+ * của khách (xem fetchFacebookProfile). Tương đương `findOrCreateCustomer` ở
  * frontend (src/data/customers.ts) nhưng chạy độc lập trên state mirror phía
  * server — 2 runtime khác nhau (Node vs trình duyệt), không gọi lẫn nhau
  * được nên phải viết lại logic tương tự ở đây.
  */
-export function findOrCreateCustomerByFacebookId(state: StateSnapshot, psid: string): CustomerShape {
+export async function findOrCreateCustomerByFacebookId(
+  state: StateSnapshot,
+  psid: string,
+  pageAccessToken: string,
+): Promise<CustomerShape> {
   const customers = customersOf(state);
   const existing = customers.find((c) => c.facebookId === psid);
   if (existing) return existing;
+  const profile = await fetchFacebookProfile(psid, pageAccessToken);
   const customer: CustomerShape = {
     // Tiền tố "fbu" (không phải "u") CỐ Ý — khách mẫu có sẵn trong app dùng id
     // "u1".."u7". Nếu dùng chung tiền tố "u", lần đầu server tạo khách Facebook
@@ -80,8 +115,9 @@ export function findOrCreateCustomerByFacebookId(state: StateSnapshot, psid: str
     // 1 bản cập nhật khách cũ chứ không phải khách mới (xem mergeRemoteCustomers
     // ở src/data/customers.ts) — đây là lý do khách Facebook test "biến mất".
     id: nextId("fbu", customers),
-    name: "Khách Facebook",
+    name: profile?.name || "Khách Facebook",
     phone: "",
+    avatar: profile?.avatar,
     facebookId: psid,
     tag: "Mới",
     totalOrders: 0,

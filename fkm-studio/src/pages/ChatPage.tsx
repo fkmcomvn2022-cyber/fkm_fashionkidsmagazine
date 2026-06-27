@@ -208,7 +208,7 @@ export default function ChatPage() {
                 className="flex items-center gap-3 rounded-3xl bg-surface border border-border-soft shadow-soft p-3 text-left tap-scale"
               >
                 <div className="relative">
-                  <Avatar name={c.name} size={44} />
+                  <Avatar name={c.name} src={c.avatar} size={44} />
                   <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#1877F2] flex items-center justify-center border-2 border-surface">
                     <MessageCircle size={9} className="text-white" />
                   </span>
@@ -242,7 +242,7 @@ export default function ChatPage() {
         <button onClick={() => setSelected(null)} className="w-8 h-8 rounded-full bg-surface border border-border-soft flex items-center justify-center tap-scale">
           <ChevronLeft size={16} />
         </button>
-        <Avatar name={customer?.name ?? "?"} size={36} />
+        <Avatar name={customer?.name ?? "?"} src={customer?.avatar} size={36} />
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-semibold text-ink">{customer?.name}</p>
           <p className="text-[11px] text-muted">qua Facebook Messenger</p>
