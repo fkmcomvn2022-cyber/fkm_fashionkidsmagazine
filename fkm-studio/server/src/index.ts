@@ -337,7 +337,19 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
     const customer = await findOrCreateCustomerByFacebookId(state, msg.psid, FB_PAGE_ACCESS_TOKEN);
     const hasImage = msg.attachmentUrls.length > 0;
     const text = msg.text ?? (hasImage ? "[Đã gửi ảnh]" : "");
-    if (!text) continue;
+    if (!text) {
+      // BUG (2026-06-28): khách "fbu2" (tài khoản admin) đã được tạo (qua
+      // findOrCreateCustomerByFacebookId phía trên) nhưng KHÔNG có tin nhắn
+      // nào ghi vào `messages` — nghĩa là Facebook có gửi webhook (đủ psid +
+      // message) nhưng msg.text rỗng/undefined VÀ không có attachment nào có
+      // url (sticker dạng khác, share bài viết, vị trí, hoặc quick_reply
+      // không text...). Trước đây bị `continue` âm thầm, không log gì, nên
+      // không biết Facebook thực sự gửi gì. Log lại nguyên `msg` để lần sau
+      // thấy ngay psid + text + attachmentUrls thật, từ đó biết cần xử lý
+      // thêm loại nội dung gì (sticker, vị trí, share bài viết...).
+      console.warn("[facebook webhook] Bỏ qua 1 tin không có nội dung nhận diện được (psid:", msg.psid, "):", JSON.stringify(msg));
+      continue;
+    }
     appendMessage(state, { customerId: customer.id ?? "", channel: "facebook", fromCustomer: true, text });
     await sendPushToAll({
       title: `Tin nhắn mới từ ${customer.name ?? "khách"}`,
