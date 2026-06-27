@@ -228,6 +228,52 @@ export default function AiSettingsPage() {
       <ProviderSettingsPanel />
 
       <Panel
+        title="Hiệu suất & độ sáng tạo"
+        subtitle="Tự chỉnh ngay ở đây, không cần báo lại — đổi là áp dụng cho tin khách nhắn vào tiếp theo."
+      >
+        <div className="flex flex-col gap-3">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[12px] font-medium text-ink">Số tin nhớ trong hội thoại</p>
+              <span className="text-[12px] font-semibold text-brand-blue">{settings.historyWindow ?? 50} tin</span>
+            </div>
+            <input
+              type="range"
+              min={6}
+              max={50}
+              step={2}
+              value={settings.historyWindow ?? 50}
+              onChange={(e) => save({ ...settings, historyWindow: Number(e.target.value) })}
+              className="w-full"
+            />
+            <p className="text-[10px] text-muted px-0.5 mt-1">Thấp hơn = tốn ít token hơn mỗi lần AI trả lời, nhưng AI mau "quên" ý khách nói ở các tin trước trong hội thoại dài. 50 là mức nhớ nhiều nhất.</p>
+          </div>
+
+          <div className="h-px bg-border-soft" />
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[12px] font-medium text-ink">Độ sáng tạo</p>
+              <span className="text-[12px] font-semibold text-brand-blue">{(settings.temperature ?? 0.4).toFixed(1)}</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.1}
+              value={settings.temperature ?? 0.4}
+              onChange={(e) => save({ ...settings, temperature: Number(e.target.value) })}
+              className="w-full"
+            />
+            <div className="flex justify-between text-[10px] text-muted px-0.5 mt-1">
+              <span>Bám sát dữ liệu thật</span>
+              <span>Tự nhiên, đa dạng câu chữ</span>
+            </div>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel
         title="Hướng dẫn thêm cho AI"
         subtitle="Gõ tự do — vd phong cách trả lời, điều cần nhấn mạnh. Các quy tắc an toàn (không bịa giá, không tự chốt giờ) luôn được giữ, dù anh viết gì ở đây."
       >

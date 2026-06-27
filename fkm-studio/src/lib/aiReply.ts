@@ -40,6 +40,12 @@ export interface AiAutoReplySettings {
   enabled: boolean;
   customPrompt: string;
   functions: AiFunctionConfig[];
+  // 2 cài đặt studio tự chỉnh trong app (2026-06-28), KHÔNG hardcode trong
+  // code nữa — xem chỗ dùng thật ở server/src/ai.ts (AiReplyContext.historyWindow/
+  // temperature). Để trống/undefined = server tự dùng giá trị mặc định
+  // (50 tin / 0.4) — không bắt buộc phải có ở dữ liệu cũ trước bản này.
+  historyWindow?: number; // số tin gần nhất đưa vào ngữ cảnh — thấp hơn = tốn ít token hơn, nhưng AI mau "quên" ý cũ trong hội thoại dài
+  temperature?: number; // 0–1, độ "sáng tạo": thấp = bám sát dữ liệu thật, cao = trả lời tự nhiên/đa dạng hơn nhưng dễ lệch ý
 }
 
 // 3 nghiệp vụ thật đã có sẵn trong app, an toàn để AI tự gọi (không tạo đơn
@@ -128,6 +134,8 @@ export let aiAutoReplySettings: AiAutoReplySettings = {
   enabled: false,
   customPrompt: "",
   functions: DEFAULT_AI_FUNCTIONS,
+  historyWindow: 50,
+  temperature: 0.4,
 };
 
 export function setAiAutoReplySettings(next: AiAutoReplySettings) {

@@ -143,7 +143,8 @@ const SYSTEM_PROMPT_HEADER = `Bạn là nhân viên CSKH của FKM Studio (studi
 - CHỈ dùng đúng giá/tên concept/dịch vụ có trong phần "Thông tin studio" dưới đây — KHÔNG tự bịa giá, KHÔNG tự đặt ra khuyến mãi/giảm giá không có trong dữ liệu.
 - KHÔNG tự chốt giờ/ngày chụp cụ thể hoặc khẳng định "còn slot" — vì bạn không có dữ liệu lịch trống thật. Nếu khách hỏi lịch, trả lời rằng sẽ kiểm tra và nhân viên studio sẽ xác nhận lại sớm.
 - Nếu khách hỏi điều ngoài phạm vi (khiếu nại, yêu cầu đặc biệt, câu hỏi không liên quan chụp ảnh), trả lời nhẹ nhàng, không hứa hẹn cụ thể, và nói sẽ có nhân viên hỗ trợ thêm.
-- Không dùng quá nhiều emoji (tối đa 1).`;
+- Không dùng quá nhiều emoji (tối đa 1).
+- Nếu câu trả lời có từ 2 Ý KHÁC NHAU trở lên (vd vừa báo giá vừa hỏi thêm thông tin, hoặc vừa chào vừa tư vấn), xuống dòng 2 lần (để 1 dòng trống) giữa mỗi ý — hệ thống sẽ tự tách mỗi đoạn cách nhau như vậy thành 1 tin nhắn Messenger riêng, giống người thật nhắn nhiều tin liên tiếp. Trong CÙNG 1 ý chỉ xuống dòng 1 lần hoặc viết liền, KHÔNG để trống dòng nếu câu sau vẫn thuộc cùng 1 ý.`;
 
 // Tham số (JSON schema dạng Gemini OpenAPI-lite) của từng hàm — CỐ ĐỊNH, studio
 // không sửa được, chỉ sửa được "description" (xem AiFunctionConfig ở frontend).
@@ -536,7 +537,10 @@ async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, sys
   // Gemini yêu cầu role đầu tiên trong `contents` là "user" — cắt từ tin khách
   // gần nhất, bỏ các tin phía trước cùng-role-liên-tiếp ở đầu nếu lịch sử bắt
   // đầu bằng tin studio (hiếm, nhưng tránh lỗi 400 từ API).
-  const recent = ctx.history.slice(-CHAT_HISTORY_WINDOW);
+  // ctx.historyWindow: studio tự chỉnh ở Cài đặt > AI (2026-06-28, xem
+  // [[fkm-studio-ai-tunable-settings]]) — CHAT_HISTORY_WINDOW chỉ còn là giá
+  // trị mặc định khi studio chưa từng lưu cài đặt này.
+  const recent = ctx.history.slice(-(ctx.historyWindow ?? CHAT_HISTORY_WINDOW));
   const firstCustomerIdx = recent.findIndex((t) => t.fromCustomer);
   const turns = firstCustomerIdx > 0 ? recent.slice(firstCustomerIdx) : recent;
   if (turns.length === 0) return null;
@@ -550,7 +554,7 @@ async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, sys
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents,
       ...(tools ? { tools } : {}),
-      generationConfig: { temperature: 0.4, maxOutputTokens: 300 },
+      generationConfig: { temperature: ctx.temperature ?? 0.4, maxOutputTokens: 300 },
     });
 
     const parts = data.candidates?.[0]?.content?.parts ?? [];
@@ -629,6 +633,7 @@ async function callOpenAiCompatible(
   messages: OpenAiCompatMessage[],
   tools: ReturnType<typeof buildOpenAiTools> | undefined,
   maxTokens: number,
+  temperature = 0.4,
 ): Promise<OpenAiCompatMessage> {
   let res: Response;
   try {
@@ -639,7 +644,7 @@ async function callOpenAiCompatible(
         model: cfg.model,
         messages,
         ...(tools?.length ? { tools } : {}),
-        temperature: 0.4,
+        temperature,
         max_tokens: maxTokens,
       }),
     });
@@ -661,7 +666,7 @@ async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfi
   const enabledFunctions = (ctx.functions ?? []).filter((f) => f.enabled && FUNCTION_SCHEMAS[f.key]);
   const tools = enabledFunctions.length ? buildOpenAiTools(enabledFunctions) : undefined;
 
-  const recent = ctx.history.slice(-CHAT_HISTORY_WINDOW);
+  const recent = ctx.history.slice(-(ctx.historyWindow ?? CHAT_HISTORY_WINDOW));
   const firstCustomerIdx = recent.findIndex((t) => t.fromCustomer);
   const turns = firstCustomerIdx > 0 ? recent.slice(firstCustomerIdx) : recent;
   if (turns.length === 0) return null;
@@ -672,7 +677,7 @@ async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfi
   ];
 
   for (let round = 0; round < MAX_FUNCTION_CALL_ROUNDS; round++) {
-    const message = await callOpenAiCompatible(baseUrl, cfg, messages, tools, 300);
+    const message = await callOpenAiCompatible(baseUrl, cfg, messages, tools, 300, ctx.temperature ?? 0.4);
     const toolCalls = message.tool_calls ?? [];
     if (toolCalls.length === 0) {
       const text = typeof message.content === "string" ? message.content.trim() : "";
@@ -704,6 +709,7 @@ async function runOpenAiCompatibleVisionText(
   base64: string,
   mimeType: string,
   maxTokens: number,
+  temperature = 0.4,
 ): Promise<string | null> {
   const messages: OpenAiCompatMessage[] = [
     ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
@@ -718,7 +724,7 @@ async function runOpenAiCompatibleVisionText(
       ],
     },
   ];
-  const message = await callOpenAiCompatible(baseUrl, cfg, messages, undefined, maxTokens);
+  const message = await callOpenAiCompatible(baseUrl, cfg, messages, undefined, maxTokens, temperature);
   const text = typeof message.content === "string" ? message.content.trim() : "";
   return text || null;
 }
@@ -733,6 +739,28 @@ export interface AiReplyContext {
   studioContext: string;
   customPrompt?: string;
   functions: AiFunctionConfig[];
+  // 2 cài đặt studio tự chỉnh ở Cài đặt > AI, KHÔNG cần sửa code (2026-06-28):
+  // số tin nhớ trong ngữ cảnh (mặc định CHAT_HISTORY_WINDOW nếu chưa lưu) và
+  // độ "sáng tạo" (mặc định 0.4 nếu chưa lưu — thấp = bám sát dữ liệu thật,
+  // cao = trả lời tự nhiên/đa dạng hơn nhưng dễ lệch ý).
+  historyWindow?: number;
+  temperature?: number;
+}
+
+/**
+ * Tách câu trả lời dài thành nhiều tin nhắn ngắn để gửi liên tiếp qua
+ * Facebook, giống cách anh dùng ở UChat: AI được dặn ở SYSTEM_PROMPT_HEADER
+ * xuống dòng 2 lần (1 dòng trống) giữa các Ý KHÁC NHAU, trong cùng 1 ý chỉ
+ * xuống dòng 1 lần hoặc viết liền. Tách đúng theo ranh giới đó — KHÔNG cắt
+ * theo số ký tự cố định, để giữ nguyên ý AI đã chủ động ngắt, tránh cắt giữa
+ * câu trông gượng. Nếu AI không xuống dòng 2 lần ở đâu cả thì trả về đúng 1
+ * tin như cũ (không có gì bị mất hành vi hiện tại).
+ */
+export function splitReplyIntoMessages(text: string): string[] {
+  return text
+    .split(/\n\s*\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export async function generateAiReply(ctx: AiReplyContext): Promise<string | null> {
@@ -802,6 +830,7 @@ export interface ImageReplyContext {
   mimeType: string;
   studioContext: string;
   customPrompt?: string;
+  temperature?: number; // cùng cài đặt "độ sáng tạo" với trả lời chữ, xem AiReplyContext
 }
 
 export async function generateImageReply(ctx: ImageReplyContext): Promise<string | null> {
@@ -815,7 +844,7 @@ export async function generateImageReply(ctx: ImageReplyContext): Promise<string
       const data = await callGemini(cfg, {
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: "user", parts: [{ inlineData: { mimeType: ctx.mimeType, data: ctx.base64 } }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 200 },
+        generationConfig: { temperature: ctx.temperature ?? 0.4, maxOutputTokens: 200 },
       });
       const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
       return text || null;
@@ -829,6 +858,7 @@ export async function generateImageReply(ctx: ImageReplyContext): Promise<string
         ctx.base64,
         ctx.mimeType,
         200,
+        ctx.temperature ?? 0.4,
       );
     }
     return null;

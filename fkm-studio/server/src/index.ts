@@ -21,7 +21,15 @@ import {
   sendFacebookMessage,
   verifyFacebookSignature,
 } from "./facebook.js";
-import { buildStudioContext, classifyPaymentImage, generateAiReply, generateImageReply, type AiFunctionConfig, type ChatTurn } from "./ai.js";
+import {
+  buildStudioContext,
+  classifyPaymentImage,
+  generateAiReply,
+  generateImageReply,
+  splitReplyIntoMessages,
+  type AiFunctionConfig,
+  type ChatTurn,
+} from "./ai.js";
 import { getMaskedProviders, reorderProviders, updateProviders, type AiProviderKey, type AiProviderPatch } from "./aiProviders.js";
 import { getEffectiveFbConfig, getMaskedFbConfig, updateFbConfig, type FbConfigPatch } from "./fbConfig.js";
 import { confirmDepositFromScreenshot } from "./chatOrders.js";
@@ -312,12 +320,40 @@ app.post("/webhook/facebook", async (req, res) => {
  *     nhiên, không escalate, không bịa số tiền.
  * Mọi lỗi ở đây chỉ log, không throw — không chặn các tin khác trong batch.
  */
+// Gửi 1 câu trả lời AI cho khách — có thể tách thành NHIỀU tin Messenger
+// liên tiếp nếu AI đã chủ động ngắt ý bằng 2 lần xuống dòng (xem
+// splitReplyIntoMessages + SYSTEM_PROMPT_HEADER ở ai.ts, theo đúng quy ước
+// anh dùng ở UChat) — để giống người thật nhắn nhiều tin, không dồn 1 cục.
+// Dừng ~0.9s giữa mỗi tin (anh chọn "có dừng nhẹ" khi em hỏi). Trả về true
+// nếu gửi được ÍT NHẤT 1 đoạn.
+async function sendAiReplyChunks(
+  state: Record<string, unknown>,
+  customer: { id?: string; facebookId?: string },
+  reply: string,
+  token: string,
+): Promise<boolean> {
+  if (!customer.facebookId) return false;
+  const chunks = splitReplyIntoMessages(reply);
+  let sentAny = false;
+  for (let i = 0; i < chunks.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 900));
+    const sent = await sendFacebookMessage(customer.facebookId, chunks[i], token);
+    if (sent.ok) {
+      appendMessage(state, { customerId: customer.id ?? "", channel: "facebook", fromCustomer: false, text: chunks[i], aiGenerated: true });
+      sentAny = true;
+    } else {
+      console.error("[ai] Gửi 1 đoạn tin AI thất bại:", sent.error);
+    }
+  }
+  return sentAny;
+}
+
 async function handleIncomingImage(
   state: Record<string, unknown>,
   customer: { id?: string; facebookId?: string; name?: string },
   imageUrl: string,
   isAutomationEnabled: (key: string) => boolean,
-  aiSettings: { enabled?: boolean; customPrompt?: string } | undefined,
+  aiSettings: { enabled?: boolean; customPrompt?: string; temperature?: number } | undefined,
   FB_PAGE_ACCESS_TOKEN: string,
 ): Promise<void> {
   if (!customer.facebookId || !FB_PAGE_ACCESS_TOKEN) return;
@@ -358,12 +394,10 @@ async function handleIncomingImage(
         mimeType: img.mimeType,
         studioContext: buildStudioContext(state as never),
         customPrompt: aiSettings.customPrompt,
+        temperature: aiSettings.temperature,
       });
       if (reply) {
-        const sent = await sendFacebookMessage(customer.facebookId, reply, FB_PAGE_ACCESS_TOKEN);
-        if (sent.ok) {
-          appendMessage(state, { customerId: customer.id ?? "", channel: "facebook", fromCustomer: false, text: reply, aiGenerated: true });
-        }
+        await sendAiReplyChunks(state, customer, reply, FB_PAGE_ACCESS_TOKEN);
       }
     } catch (err) {
       console.error("[ai] Lỗi khi AI tự trả lời ảnh:", err);
@@ -407,7 +441,13 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
     });
 
     const aiSettings = state.aiAutoReplySettings as
-      | { enabled?: boolean; customPrompt?: string; functions?: AiFunctionConfig[] }
+      | {
+          enabled?: boolean;
+          customPrompt?: string;
+          functions?: AiFunctionConfig[];
+          historyWindow?: number;
+          temperature?: number;
+        }
       | undefined;
 
     // Ảnh đính kèm — đi qua nhánh riêng (xác nhận cọc tiền định / AI nhìn ảnh
@@ -439,24 +479,19 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
           studioContext: buildStudioContext(state),
           customPrompt: aiSettings.customPrompt,
           functions: aiSettings.functions ?? [],
+          historyWindow: aiSettings.historyWindow,
+          temperature: aiSettings.temperature,
         });
         if (reply) {
-          const sendResult = await sendFacebookMessage(customer.facebookId, reply, FB_PAGE_ACCESS_TOKEN);
-          if (sendResult.ok) {
-            appendMessage(state, {
-              customerId: customer.id ?? "",
-              channel: "facebook",
-              fromCustomer: false,
-              text: reply,
-              aiGenerated: true,
-            });
+          const sentAny = await sendAiReplyChunks(state, customer, reply, FB_PAGE_ACCESS_TOKEN);
+          if (sentAny) {
             await sendPushToAll({
               title: "FKM Studio",
               body: `AI đã tự trả lời ${customer.name ?? "khách"}`,
               url: "/chat",
             });
           } else {
-            console.error("[ai] Gửi trả lời AI thất bại:", sendResult.error);
+            console.error("[ai] Gửi trả lời AI thất bại (tất cả đoạn đều lỗi)");
           }
         }
       } catch (err) {
