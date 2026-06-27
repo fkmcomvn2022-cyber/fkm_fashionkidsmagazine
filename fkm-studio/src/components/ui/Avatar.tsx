@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 const palette = ["#4f6df5", "#9b5cf6", "#ef5fa7", "#ff9447", "#1fb27a", "#f5a524"];
 
 function colorFor(name: string) {
@@ -19,13 +21,20 @@ interface AvatarProps {
 }
 
 export function Avatar({ name, src, size = 40, className }: AvatarProps) {
-  if (src) {
+  // Ảnh avatar Facebook (platform-lookaside.fbsbx.com) đôi khi không tải được
+  // trong trình duyệt (link hết hạn, bị chặn hotlink, mạng chậm...) — không có
+  // onError thì <img> sẽ vỡ ảnh vĩnh viễn thay vì rơi về chữ viết tắt. Theo
+  // dõi lỗi tải theo src cụ thể (key) để tự thử lại khi src đổi (vd lấy được
+  // avatar mới qua lazy-backfill ở server).
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (src && src !== failedSrc) {
     return (
       <img
         src={src}
         alt={name}
         className={`rounded-full object-cover ${className ?? ""}`}
         style={{ width: size, height: size }}
+        onError={() => setFailedSrc(src)}
       />
     );
   }

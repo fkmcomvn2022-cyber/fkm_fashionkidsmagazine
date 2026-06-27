@@ -58,9 +58,12 @@ Facebook chỉ gửi webhook tới 1 địa chỉ HTTPS công khai (không gọi
    - `FB_VERIFY_TOKEN` = 1 chuỗi tự đặt bất kỳ (vd. `fkm_xac_minh_2026`) — sẽ dùng lại ở bước khai báo webhook trên Meta.
    - `FB_APP_SECRET` = App Secret (Meta for Developers > App > Cài đặt > Cơ bản).
    - `FB_PAGE_ACCESS_TOKEN` = Page Access Token (Meta for Developers > App > Messenger > Cài đặt Messenger).
-   - `GEMINI_API_KEY` (tuỳ chọn, chỉ cần nếu dùng tính năng AI tự trả lời —
-     Giai đoạn 3) = lấy miễn phí ở https://aistudio.google.com/apikey. Thiếu
-     biến này thì AI tự bỏ qua, không lỗi, anh tự trả lời tay như bình thường.
+   - `GEMINI_API_KEY` (tuỳ chọn) = lấy miễn phí ở https://aistudio.google.com/apikey
+     — chỉ là "mặc định ngầm" cho Gemini nếu chưa nhập key qua UI. Từ Giai
+     đoạn 9, key của cả 3 nhà AI (Gemini/OpenAI/DeepSeek) cấu hình NGAY TRONG
+     APP (Cài đặt > AI > Nhà cung cấp AI) — không cần thêm biến môi trường nào
+     khác trên Render cho OpenAI/DeepSeek. Thiếu key (cả 2 đường) thì AI tự bỏ
+     qua, không lỗi, anh tự trả lời tay như bình thường.
 5. Bấm "Create Web Service" — Render build + chạy, ra 1 URL dạng
    `https://fkm-studio-server.onrender.com`.
 6. Cập nhật `VITE_BACKEND_URL=https://fkm-studio-server.onrender.com` ở

@@ -22,6 +22,7 @@ import {
   verifyFacebookSignature,
 } from "./facebook.js";
 import { buildStudioContext, classifyPaymentImage, generateAiReply, generateImageReply, type AiFunctionConfig, type ChatTurn } from "./ai.js";
+import { getMaskedProviders, reorderProviders, updateProviders, type AiProviderKey, type AiProviderPatch } from "./aiProviders.js";
 import { confirmDepositFromScreenshot } from "./chatOrders.js";
 import { runAutomationCron } from "./automationCron.js";
 import { generateAssistantReply, type AssistantTurn } from "./assistant.js";
@@ -140,6 +141,29 @@ app.put("/api/state", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("Không lưu được state:", err);
+    res.status(500).json({ ok: false, error: "write_failed" });
+  }
+});
+
+/**
+ * Phase 9 (xem [[fkm-studio-ai-chatbot-roadmap]]) — cấu hình 3 nhà cung cấp AI
+ * (key/model/bật-tắt/thứ tự ưu tiên), TÁCH RIÊNG khỏi GET/PUT /api/state ở
+ * trên vì route đó công khai không xác thực — xem comment đầu file
+ * aiProviders.ts để biết vì sao không thể lưu API key thật vào đó. GET ở đây
+ * cũng KHÔNG bao giờ trả nguyên văn key, chỉ trả vài ký tự cuối để hiển thị.
+ */
+app.get("/api/ai-providers", async (_req, res) => {
+  res.json({ providers: await getMaskedProviders() });
+});
+
+app.put("/api/ai-providers", async (req, res) => {
+  try {
+    const { patches, order } = (req.body ?? {}) as { patches?: AiProviderPatch[]; order?: AiProviderKey[] };
+    if (Array.isArray(patches) && patches.length) await updateProviders(patches);
+    if (Array.isArray(order) && order.length) await reorderProviders(order);
+    res.json({ ok: true, providers: await getMaskedProviders() });
+  } catch (err) {
+    console.error("[ai-providers] Không lưu được cấu hình:", err);
     res.status(500).json({ ok: false, error: "write_failed" });
   }
 });

@@ -73,7 +73,18 @@ async function fetchFacebookProfile(
     }
     const data = (await res.json()) as { first_name?: string; last_name?: string; profile_pic?: string };
     const name = [data.first_name, data.last_name].filter(Boolean).join(" ").trim();
-    return { name: name || undefined, avatar: data.profile_pic };
+    if (!data.profile_pic) {
+      // Theo doc Meta (User Profile API, cập nhật 18/03/2026): field
+      // `profile_pic` cần Advanced Access riêng cho feature "Business Asset
+      // User Profile Access" — tách biệt với quyền đọc tên (first_name/
+      // last_name). Vì vậy có thể trả về tên thành công nhưng vẫn thiếu
+      // avatar dù request không lỗi (không phải bug code) — log nguyên data
+      // trả về để biết Facebook có gửi field này không, hay chỉ rỗng tạm
+      // thời ở lần gọi đó (lazy-backfill ở findOrCreateCustomerByFacebookId
+      // sẽ tự thử lại ở tin nhắn kế tiếp của khách này).
+      console.warn("[facebook] Lấy được tên nhưng thiếu profile_pic (PSID", psid, "):", JSON.stringify(data));
+    }
+    return { name: name || undefined, avatar: data.profile_pic || undefined };
   } catch (err) {
     console.warn("[facebook] Lỗi khi lấy thông tin khách:", err);
     return null;

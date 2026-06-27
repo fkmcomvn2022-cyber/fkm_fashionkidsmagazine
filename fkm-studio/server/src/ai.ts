@@ -1,8 +1,8 @@
 /**
- * Phase 3 (xem [[fkm-studio-ai-chatbot-roadmap]]) — AI (Gemini) tự đọc tin
- * khách gửi vào và tự soạn trả lời, dựa trên giá/concept THẬT của studio (đọc
- * từ state mirror, xem `buildStudioContext`). Dùng fetch thẳng tới REST API
- * của Gemini (cùng pattern với `sendFacebookMessage` ở facebook.ts) — không
+ * Phase 3 (xem [[fkm-studio-ai-chatbot-roadmap]]) — AI tự đọc tin khách gửi
+ * vào và tự soạn trả lời, dựa trên giá/concept THẬT của studio (đọc từ state
+ * mirror, xem `buildStudioContext`). Dùng fetch thẳng tới REST API của từng
+ * nhà cung cấp (cùng pattern với `sendFacebookMessage` ở facebook.ts) — không
  * thêm SDK ngoài để giữ dependency tối giản.
  *
  * Phase 3.1 (UChat-style function-calling) — AI có thể tự gọi 1 trong vài
@@ -10,18 +10,30 @@
  * viên hỗ trợ) khi đang soạn trả lời, giống cách UChat cho cấu hình AI Agent
  * function. Tên kỹ thuật + tham số của mỗi hàm là CỐ ĐỊNH (định nghĩa ở
  * FUNCTION_SCHEMAS dưới đây) — studio chỉ tự biên tập "description" (mô tả tự
- * nhiên, chính là phần quyết định KHI NÀO Gemini chọn gọi hàm này) qua Cài đặt
+ * nhiên, chính là phần quyết định KHI NÀO AI chọn gọi hàm này) qua Cài đặt
  * trong app (xem src/lib/aiReply.ts ở frontend), KHÔNG cho tự đổi tên/tham số
  * vì các hàm này đụng vào dữ liệu thật.
  *
- * Biến môi trường cần có (server/.env khi chạy local, hoặc dashboard
- * Render/Railway khi deploy — xem README.md):
- *   GEMINI_API_KEY  - lấy ở https://aistudio.google.com/apikey (miễn phí).
- *   GEMINI_MODEL    - tuỳ chọn, mặc định "gemini-2.5-flash" (rẻ, đủ nhanh).
+ * Phase 9 (2026-06-28, theo yêu cầu thêm sau khi anh gặp Gemini quá tải tạm
+ * thời + trải nghiệm UChat AI khác đọc ảnh Facebook lỗi) — ĐA NHÀ CUNG CẤP:
+ * Gemini/OpenAI/DeepSeek, có RETRY (lỗi tạm thời thử lại cùng 1 nhà) + FALLBACK
+ * (hết retry thì sang nhà kế tiếp theo thứ tự cấu hình ở Cài đặt > AI, xem
+ * server/src/aiProviders.ts). Ảnh khách gửi LUÔN tải về + mã hoá base64 trước
+ * khi gửi cho AI (KHÔNG gửi thẳng link Facebook) — đây chính là cách tránh lỗi
+ * "download error" OpenAI hay gặp khi tự đi tải link ảnh có thể hết hạn/bị
+ * chặn hotlink. DeepSeek bị loại khỏi danh sách thử cho nhu cầu ảnh vì API
+ * DeepSeek (khác chat web) hiện CHƯA có endpoint nhận ảnh — đúng điều anh gặp
+ * ở UChat ("deepseek thì không đọc được"), không phải lỗi code app này.
  *
- * Thiếu GEMINI_API_KEY -> generateAiReply() trả về null, nơi gọi (index.ts)
- * sẽ bỏ qua bước trả lời, KHÔNG throw — tin khách vẫn được lưu vào hộp thư
- * bình thường, chỉ là chưa có ai tự trả lời thay.
+ * Cấu hình API key/model qua UI (Cài đặt > AI > Nhà cung cấp AI), KHÔNG còn
+ * thuần biến môi trường — xem aiProviders.ts. Biến môi trường GEMINI_API_KEY/
+ * GEMINI_MODEL (server/.env hoặc dashboard Render) vẫn được giữ làm mặc định
+ * ngầm cho Gemini nếu studio chưa nhập key qua UI, không phá hành vi deploy cũ.
+ *
+ * Không có nhà cung cấp nào khả dụng (chưa cấu hình key hoặc đều tắt) ->
+ * generateAiReply() trả về null, nơi gọi (index.ts) sẽ bỏ qua bước trả lời,
+ * KHÔNG throw — tin khách vẫn được lưu vào hộp thư bình thường, chỉ là chưa
+ * có ai tự trả lời thay.
  */
 import type { StateSnapshot } from "./store.js";
 import { sendPushToAll } from "./push.js";
@@ -39,9 +51,8 @@ import {
   type UpsellOrderArgs,
 } from "./chatOrders.js";
 import { checkAvailableSlots } from "./availability.js";
+import { getOrderedAvailableProviders, type AiProviderConfig } from "./aiProviders.js";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
 const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN ?? "";
 
 export interface ChatTurn {
@@ -420,6 +431,61 @@ async function executeFunction(
   }
 }
 
+// --- Phase 9: lỗi có phân loại "tạm thời hay không" + bộ điều phối retry/
+// fallback đa nhà cung cấp -----------------------------------------------
+
+/**
+ * Lỗi khi gọi 1 nhà cung cấp AI — `transient` quyết định có nên thử lại CÙNG
+ * nhà này không (vd lỗi quá tải/giới hạn tốc độ thì thử lại có ích, lỗi key
+ * sai/model không tồn tại thì thử lại vô ích, nên sang nhà khác ngay).
+ */
+class AiProviderError extends Error {
+  transient: boolean;
+  constructor(message: string, transient: boolean) {
+    super(message);
+    this.transient = transient;
+  }
+}
+
+const RETRY_ATTEMPTS_PER_PROVIDER = 2; // 1 lần gọi + 1 lần thử lại khi lỗi tạm thời, trước khi sang nhà kế tiếp
+
+/**
+ * Thử lần lượt các nhà cung cấp AI đang bật + có key (đúng thứ tự ưu tiên
+ * studio đã cấu hình ở Cài đặt > AI), mỗi nhà retry ngắn khi gặp lỗi tạm thời
+ * (vd "Gemini quá tải" — đúng điều anh hay gặp), hết retry thì sang nhà kế
+ * tiếp. `capability: "vision"` lọc sẵn chỉ còn nhà đọc được ảnh (Gemini/OpenAI
+ * — DeepSeek API hiện chưa hỗ trợ ảnh, xem aiProviders.ts).
+ */
+async function withProviderFallback<T>(
+  capability: "text" | "vision",
+  attempt: (cfg: AiProviderConfig) => Promise<T | null>,
+): Promise<T | null> {
+  const providers = await getOrderedAvailableProviders(capability === "vision" ? "vision" : undefined);
+  if (providers.length === 0) {
+    console.error(`[ai] Không có nhà cung cấp AI nào khả dụng cho "${capability}" (chưa cấu hình key hoặc đều tắt ở Cài đặt > AI).`);
+    return null;
+  }
+  for (const cfg of providers) {
+    for (let attemptIdx = 0; attemptIdx < RETRY_ATTEMPTS_PER_PROVIDER; attemptIdx++) {
+      try {
+        const result = await attempt(cfg);
+        if (result != null) return result;
+        break; // null hợp lệ (model không có gì để trả lời) — không phải lỗi, sang nhà kế tiếp luôn, không retry
+      } catch (err) {
+        const transient = err instanceof AiProviderError ? err.transient : true;
+        console.error(
+          `[ai] Nhà "${cfg.provider}" (model ${cfg.model}) lỗi ở lượt ${attemptIdx + 1}/${RETRY_ATTEMPTS_PER_PROVIDER}:`,
+          err instanceof Error ? err.message : err,
+        );
+        if (!transient || attemptIdx === RETRY_ATTEMPTS_PER_PROVIDER - 1) break; // lỗi vĩnh viễn hoặc hết lượt thử -> sang nhà kế tiếp
+        await new Promise((r) => setTimeout(r, 400 * (attemptIdx + 1))); // backoff ngắn trước khi thử lại CÙNG nhà này
+      }
+    }
+  }
+  console.error(`[ai] Đã thử hết các nhà cung cấp AI khả dụng cho "${capability}", không ai trả lời được.`);
+  return null;
+}
+
 // --- Gọi Gemini, có hỗ trợ function-calling nhiều lượt -----------------
 
 interface GeminiPart {
@@ -435,25 +501,31 @@ interface GeminiResponse {
   candidates?: { content?: { parts?: GeminiPart[] } }[];
 }
 
-const MAX_FUNCTION_CALL_ROUNDS = 4; // chặn vòng lặp vô hạn nếu Gemini cứ gọi hàm liên tục
+const MAX_FUNCTION_CALL_ROUNDS = 4; // chặn vòng lặp vô hạn nếu AI cứ gọi hàm liên tục
 
-export interface AiReplyContext {
-  state: StateSnapshot;
-  customer: CustomerShape;
-  history: ChatTurn[];
-  studioContext: string;
-  customPrompt?: string;
-  functions: AiFunctionConfig[];
+async function callGemini(cfg: AiProviderConfig, body: Record<string, unknown>): Promise<GeminiResponse> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(cfg.apiKey)}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    );
+  } catch (err) {
+    throw new AiProviderError(`Lỗi mạng khi gọi Gemini: ${err}`, true);
+  }
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => "");
+    // 429 (RESOURCE_EXHAUSTED) và 503 (UNAVAILABLE — đúng "quá tải tạm thời"
+    // anh hay gặp) cùng các lỗi 5xx khác đều coi là tạm thời, nên thử lại.
+    const transient = res.status === 429 || res.status === 503 || res.status >= 500;
+    throw new AiProviderError(`Gemini trả lỗi ${res.status}: ${bodyText.slice(0, 300)}`, transient);
+  }
+  return (await res.json()) as GeminiResponse;
 }
 
-export async function generateAiReply(ctx: AiReplyContext): Promise<string | null> {
-  if (!GEMINI_API_KEY) return null;
-
+async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, systemPrompt: string): Promise<string | null> {
   const enabledFunctions = (ctx.functions ?? []).filter((f) => f.enabled && FUNCTION_SCHEMAS[f.key]);
   const tools = enabledFunctions.length ? [{ functionDeclarations: enabledFunctions.map(buildToolDeclaration) }] : undefined;
-
-  const extra = ctx.customPrompt?.trim() ? `\n\nHướng dẫn thêm từ studio:\n${ctx.customPrompt.trim()}` : "";
-  const systemPrompt = `${SYSTEM_PROMPT_HEADER}${extra}\n\nThông tin studio:\n${ctx.studioContext}`;
 
   // Gemini yêu cầu role đầu tiên trong `contents` là "user" — cắt từ tin khách
   // gần nhất, bỏ các tin phía trước cùng-role-liên-tiếp ở đầu nếu lịch sử bắt
@@ -461,37 +533,19 @@ export async function generateAiReply(ctx: AiReplyContext): Promise<string | nul
   const recent = ctx.history.slice(-12);
   const firstCustomerIdx = recent.findIndex((t) => t.fromCustomer);
   const turns = firstCustomerIdx > 0 ? recent.slice(firstCustomerIdx) : recent;
+  if (turns.length === 0) return null;
   const contents: GeminiContent[] = turns.map((t) => ({
     role: t.fromCustomer ? "user" : "model",
     parts: [{ text: t.text }],
   }));
-  if (contents.length === 0) return null;
 
   for (let round = 0; round < MAX_FUNCTION_CALL_ROUNDS; round++) {
-    let data: GeminiResponse;
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            ...(tools ? { tools } : {}),
-            generationConfig: { temperature: 0.4, maxOutputTokens: 300 },
-          }),
-        },
-      );
-      if (!res.ok) {
-        console.error("[ai] Gemini trả lỗi:", res.status, await res.text());
-        return null;
-      }
-      data = (await res.json()) as GeminiResponse;
-    } catch (err) {
-      console.error("[ai] Gọi Gemini thất bại:", err);
-      return null;
-    }
+    const data = await callGemini(cfg, {
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      ...(tools ? { tools } : {}),
+      generationConfig: { temperature: 0.4, maxOutputTokens: 300 },
+    });
 
     const parts = data.candidates?.[0]?.content?.parts ?? [];
     const functionCallParts = parts.filter((p) => p.functionCall);
@@ -514,8 +568,176 @@ export async function generateAiReply(ctx: AiReplyContext): Promise<string | nul
     contents.push({ role: "function", parts: responseParts });
   }
 
-  console.error("[ai] Vượt quá số lượt gọi hàm cho phép, dừng lại không trả lời.");
+  console.error("[ai] (gemini) Vượt quá số lượt gọi hàm cho phép, dừng lại không trả lời.");
   return null;
+}
+
+// --- Gọi OpenAI/DeepSeek — cùng format API (DeepSeek tương thích OpenAI),
+// chỉ khác baseUrl + model. Ảnh (vision) chỉ dùng cho OpenAI (xem VISION_CAPABLE
+// ở aiProviders.ts) -------------------------------------------------------
+
+interface OpenAiContentPart {
+  type: "text" | "image_url";
+  text?: string;
+  image_url?: { url: string };
+}
+interface OpenAiCompatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | OpenAiContentPart[];
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+  tool_call_id?: string;
+}
+interface OpenAiCompatResponse {
+  choices?: { message?: OpenAiCompatMessage }[];
+}
+
+/** Chuyển schema kiểu Gemini OpenAPI-lite (type "OBJECT"/"STRING" viết hoa)
+ * sang JSON Schema chuẩn (viết thường) mà OpenAI/DeepSeek đòi — cùng 1
+ * FUNCTION_SCHEMAS định nghĩa 1 lần, dùng lại cho cả 3 nhà cung cấp. */
+function toJsonSchemaTypes(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(toJsonSchemaTypes);
+  if (schema && typeof schema === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(schema as Record<string, unknown>)) {
+      out[k] = k === "type" && typeof v === "string" ? v.toLowerCase() : toJsonSchemaTypes(v);
+    }
+    return out;
+  }
+  return schema;
+}
+
+function buildOpenAiTools(enabledFunctions: AiFunctionConfig[]) {
+  return enabledFunctions.map((fn) => ({
+    type: "function" as const,
+    function: {
+      name: fn.key,
+      description: fn.description?.trim() || FUNCTION_FALLBACK_DESCRIPTIONS[fn.key] || fn.key,
+      parameters: toJsonSchemaTypes(FUNCTION_SCHEMAS[fn.key] ?? { type: "OBJECT", properties: {} }),
+    },
+  }));
+}
+
+async function callOpenAiCompatible(
+  baseUrl: string,
+  cfg: AiProviderConfig,
+  messages: OpenAiCompatMessage[],
+  tools: ReturnType<typeof buildOpenAiTools> | undefined,
+  maxTokens: number,
+): Promise<OpenAiCompatMessage> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages,
+        ...(tools?.length ? { tools } : {}),
+        temperature: 0.4,
+        max_tokens: maxTokens,
+      }),
+    });
+  } catch (err) {
+    throw new AiProviderError(`Lỗi mạng khi gọi ${cfg.provider}: ${err}`, true);
+  }
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => "");
+    const transient = res.status === 429 || res.status >= 500;
+    throw new AiProviderError(`${cfg.provider} trả lỗi ${res.status}: ${bodyText.slice(0, 300)}`, transient);
+  }
+  const data = (await res.json()) as OpenAiCompatResponse;
+  const message = data.choices?.[0]?.message;
+  if (!message) throw new AiProviderError(`${cfg.provider} trả về response không có message`, true);
+  return message;
+}
+
+async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfig, ctx: AiReplyContext, systemPrompt: string): Promise<string | null> {
+  const enabledFunctions = (ctx.functions ?? []).filter((f) => f.enabled && FUNCTION_SCHEMAS[f.key]);
+  const tools = enabledFunctions.length ? buildOpenAiTools(enabledFunctions) : undefined;
+
+  const recent = ctx.history.slice(-12);
+  const firstCustomerIdx = recent.findIndex((t) => t.fromCustomer);
+  const turns = firstCustomerIdx > 0 ? recent.slice(firstCustomerIdx) : recent;
+  if (turns.length === 0) return null;
+
+  const messages: OpenAiCompatMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...turns.map((t): OpenAiCompatMessage => ({ role: t.fromCustomer ? "user" : "assistant", content: t.text })),
+  ];
+
+  for (let round = 0; round < MAX_FUNCTION_CALL_ROUNDS; round++) {
+    const message = await callOpenAiCompatible(baseUrl, cfg, messages, tools, 300);
+    const toolCalls = message.tool_calls ?? [];
+    if (toolCalls.length === 0) {
+      const text = typeof message.content === "string" ? message.content.trim() : "";
+      return text || null;
+    }
+
+    messages.push(message);
+    for (const call of toolCalls) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        // Bỏ qua — args rỗng, executeFunction tự xử lý thiếu tham số.
+      }
+      const result = await executeFunction(call.function.name, args, ctx.state, ctx.customer);
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+    }
+  }
+
+  console.error(`[ai] (${cfg.provider}) Vượt quá số lượt gọi hàm cho phép, dừng lại không trả lời.`);
+  return null;
+}
+
+async function runOpenAiCompatibleVisionText(
+  baseUrl: string,
+  cfg: AiProviderConfig,
+  systemPrompt: string | undefined,
+  userText: string,
+  base64: string,
+  mimeType: string,
+  maxTokens: number,
+): Promise<string | null> {
+  const messages: OpenAiCompatMessage[] = [
+    ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
+    {
+      role: "user",
+      content: [
+        { type: "text", text: userText },
+        // Luôn gửi ảnh dạng base64 data URI, KHÔNG gửi thẳng link CDN Facebook
+        // — đây chính là cách tránh lỗi "Error while downloading" OpenAI hay
+        // gặp khi link hết hạn/bị chặn hotlink (xem comment đầu file).
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
+      ],
+    },
+  ];
+  const message = await callOpenAiCompatible(baseUrl, cfg, messages, undefined, maxTokens);
+  const text = typeof message.content === "string" ? message.content.trim() : "";
+  return text || null;
+}
+
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+
+export interface AiReplyContext {
+  state: StateSnapshot;
+  customer: CustomerShape;
+  history: ChatTurn[];
+  studioContext: string;
+  customPrompt?: string;
+  functions: AiFunctionConfig[];
+}
+
+export async function generateAiReply(ctx: AiReplyContext): Promise<string | null> {
+  const extra = ctx.customPrompt?.trim() ? `\n\nHướng dẫn thêm từ studio:\n${ctx.customPrompt.trim()}` : "";
+  const systemPrompt = `${SYSTEM_PROMPT_HEADER}${extra}\n\nThông tin studio:\n${ctx.studioContext}`;
+
+  return withProviderFallback("text", (cfg) => {
+    if (cfg.provider === "gemini") return runGeminiTextLoop(cfg, ctx, systemPrompt);
+    if (cfg.provider === "openai") return runOpenAiCompatibleTextLoop(OPENAI_BASE_URL, cfg, ctx, systemPrompt);
+    return runOpenAiCompatibleTextLoop(DEEPSEEK_BASE_URL, cfg, ctx, systemPrompt);
+  });
 }
 
 // --- Giai đoạn 6: AI nhìn ảnh khách gửi (xem [[fkm-studio-ai-chatbot-roadmap]]) ---
@@ -540,38 +762,33 @@ function extractJsonBlock(text: string): string | null {
 }
 
 export async function classifyPaymentImage(base64: string, mimeType: string): Promise<ImageClassifyResult | null> {
-  if (!GEMINI_API_KEY) return null;
   const prompt =
     `Đây là 1 ảnh khách gửi cho studio chụp ảnh qua Facebook Messenger. Xác định ảnh này CÓ PHẢI là ảnh chụp màn hình ` +
     `chuyển khoản/biên lai/sao kê ngân hàng (chứng minh đã chuyển tiền) hay không. Nếu có, đọc số tiền đã chuyển (chỉ số, ` +
     `đơn vị VNĐ, không gồm chữ "đ"/"VND"). Trả lời DUY NHẤT 1 JSON object, không thêm chữ nào khác, đúng dạng: ` +
     `{"isPayment": true hoặc false, "amount": số hoặc null}`;
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ inlineData: { mimeType, data: base64 } }, { text: prompt }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 100 },
-        }),
-      },
-    );
-    if (!res.ok) {
-      console.error("[ai] Gemini Vision (phân loại ảnh) trả lỗi:", res.status, await res.text());
+
+  // DeepSeek bị loại tự động ở getOrderedAvailableProviders("vision") — không
+  // tới nhánh provider === "deepseek" bao giờ, nhưng vẫn return null cho chắc
+  // nếu sau này danh sách capability đổi.
+  return withProviderFallback("vision", async (cfg) => {
+    let text: string;
+    if (cfg.provider === "gemini") {
+      const data = await callGemini(cfg, {
+        contents: [{ role: "user", parts: [{ inlineData: { mimeType, data: base64 } }, { text: prompt }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 100 },
+      });
+      text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+    } else if (cfg.provider === "openai") {
+      text = (await runOpenAiCompatibleVisionText(OPENAI_BASE_URL, cfg, undefined, prompt, base64, mimeType, 100)) ?? "";
+    } else {
       return null;
     }
-    const data = (await res.json()) as GeminiResponse;
-    const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
     const jsonText = extractJsonBlock(text);
     if (!jsonText) return null;
     const parsed = JSON.parse(jsonText) as { isPayment?: boolean; amount?: number | null };
     return { isPayment: !!parsed.isPayment, amount: typeof parsed.amount === "number" ? parsed.amount : undefined };
-  } catch (err) {
-    console.error("[ai] Lỗi phân loại ảnh bằng Gemini Vision:", err);
-    return null;
-  }
+  });
 }
 
 export interface ImageReplyContext {
@@ -582,33 +799,32 @@ export interface ImageReplyContext {
 }
 
 export async function generateImageReply(ctx: ImageReplyContext): Promise<string | null> {
-  if (!GEMINI_API_KEY) return null;
   const extra = ctx.customPrompt?.trim() ? `\n\nHướng dẫn thêm từ studio:\n${ctx.customPrompt.trim()}` : "";
   const systemPrompt =
     `${SYSTEM_PROMPT_HEADER}${extra}\n\nThông tin studio:\n${ctx.studioContext}\n\n` +
     `Khách vừa gửi 1 ảnh (không phải ảnh chuyển khoản). Hãy nhìn ảnh, hiểu nội dung, và trả lời tự nhiên, phù hợp ngữ cảnh studio chụp ảnh.`;
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: "user", parts: [{ inlineData: { mimeType: ctx.mimeType, data: ctx.base64 } }] }],
-          generationConfig: { temperature: 0.4, maxOutputTokens: 200 },
-        }),
-      },
-    );
-    if (!res.ok) {
-      console.error("[ai] Gemini Vision (trả lời ảnh) trả lỗi:", res.status, await res.text());
-      return null;
+
+  return withProviderFallback("vision", async (cfg) => {
+    if (cfg.provider === "gemini") {
+      const data = await callGemini(cfg, {
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ inlineData: { mimeType: ctx.mimeType, data: ctx.base64 } }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 200 },
+      });
+      const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
+      return text || null;
     }
-    const data = (await res.json()) as GeminiResponse;
-    const text = (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("").trim();
-    return text || null;
-  } catch (err) {
-    console.error("[ai] Lỗi trả lời ảnh bằng Gemini Vision:", err);
+    if (cfg.provider === "openai") {
+      return runOpenAiCompatibleVisionText(
+        OPENAI_BASE_URL,
+        cfg,
+        systemPrompt,
+        "Hãy nhìn ảnh này và trả lời khách phù hợp ngữ cảnh studio chụp ảnh.",
+        ctx.base64,
+        ctx.mimeType,
+        200,
+      );
+    }
     return null;
-  }
+  });
 }

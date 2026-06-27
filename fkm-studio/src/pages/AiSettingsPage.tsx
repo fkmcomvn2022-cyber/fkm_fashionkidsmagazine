@@ -1,8 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Sparkles, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowDown, ArrowUp, KeyRound, Loader2, Check, AlertCircle } from "lucide-react";
+import { Sparkles, Wand2 } from "lucide-react";
 import { Panel } from "@/components/ui/Card";
 import { aiAutoReplySettings, setAiAutoReplySettings, type AiFunctionConfig } from "@/lib/aiReply";
+import {
+  fetchAiProviders,
+  saveAiProviders,
+  PROVIDER_LABEL,
+  PROVIDER_NOTE,
+  type AiProviderKey,
+  type MaskedProviderConfig,
+} from "@/lib/aiProviders";
 import { useAppState } from "@/lib/appState";
 
 // Nhãn tiếng Việt cho từng "nghiệp vụ" cố định — chỉ để studio biết hàm này
@@ -33,6 +42,162 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   );
 }
 
+/**
+ * Panel cài đặt 3 nhà cung cấp AI — riêng biệt khỏi `settings` ở trên (xem
+ * src/lib/aiProviders.ts) vì gọi trực tiếp /api/ai-providers, KHÔNG đi qua
+ * bumpDataVersion()/state mirror (lý do bảo mật, xem comment đầu lib đó).
+ * Thứ tự thẻ hiển thị = thứ tự ưu tiên thử khi 1 nhà bị lỗi (retry rồi mới
+ * fallback sang nhà kế tiếp, xem server/src/ai.ts:withProviderFallback) — nút
+ * mũi tên lên/xuống đổi thứ tự này.
+ */
+function ProviderSettingsPanel() {
+  const [providers, setProviders] = useState<MaskedProviderConfig[] | null>(null);
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
+  const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
+  const [savingKey, setSavingKey] = useState<AiProviderKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState<AiProviderKey | null>(null);
+
+  const load = () => {
+    fetchAiProviders()
+      .then((list) => {
+        setProviders(list);
+        setError(null);
+      })
+      .catch(() => setError("Chưa kết nối được tới server — kiểm tra lại backend đang chạy chưa."));
+  };
+
+  useEffect(load, []);
+
+  const move = async (provider: AiProviderKey, dir: -1 | 1) => {
+    if (!providers) return;
+    const idx = providers.findIndex((p) => p.provider === provider);
+    const swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= providers.length) return;
+    const reordered = [...providers];
+    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+    setProviders(reordered); // cập nhật UI ngay, không chờ server, cho cảm giác phản hồi tức thì
+    try {
+      const order = reordered.map((p) => p.provider);
+      const updated = await saveAiProviders([], order);
+      setProviders(updated);
+    } catch {
+      setError("Không đổi được thứ tự ưu tiên — thử lại sau.");
+      load();
+    }
+  };
+
+  const saveOne = async (provider: AiProviderKey) => {
+    setSavingKey(provider);
+    setError(null);
+    try {
+      const patch = {
+        provider,
+        ...(keyDrafts[provider]?.trim() ? { apiKey: keyDrafts[provider].trim() } : {}),
+        ...(modelDrafts[provider]?.trim() ? { model: modelDrafts[provider].trim() } : {}),
+      };
+      const updated = await saveAiProviders([patch]);
+      setProviders(updated);
+      setKeyDrafts((d) => ({ ...d, [provider]: "" })); // xoá draft key sau khi lưu — không giữ key thật trong state UI lâu hơn cần
+      setJustSaved(provider);
+      setTimeout(() => setJustSaved(null), 1800);
+    } catch {
+      setError("Không lưu được — kiểm tra lại kết nối server rồi thử lại.");
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const toggleEnabled = async (provider: AiProviderKey, enabled: boolean) => {
+    if (!providers) return;
+    setProviders(providers.map((p) => (p.provider === provider ? { ...p, enabled } : p)));
+    try {
+      const updated = await saveAiProviders([{ provider, enabled }]);
+      setProviders(updated);
+    } catch {
+      setError("Không lưu được trạng thái bật/tắt — thử lại sau.");
+      load();
+    }
+  };
+
+  return (
+    <Panel
+      title="Nhà cung cấp AI (key + model)"
+      subtitle="Nhập API key của từng nhà — thẻ xếp trên cùng được thử trước, lỗi/quá tải thì tự thử lại rồi chuyển sang nhà kế tiếp theo thứ tự dưới đây."
+      action={<KeyRound size={16} className="text-brand-blue" />}
+    >
+      {error && (
+        <div className="flex items-center gap-1.5 rounded-xl bg-red-50 text-red-600 px-3 py-2 text-[11px] mb-3">
+          <AlertCircle size={13} className="shrink-0" />
+          {error}
+        </div>
+      )}
+      {!providers ? (
+        <div className="flex items-center justify-center py-6 text-muted text-[12px] gap-2">
+          <Loader2 size={14} className="animate-spin" /> Đang tải cấu hình...
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {providers.map((p, idx) => (
+            <div key={p.provider} className="rounded-2xl border border-border-soft p-3 flex flex-col gap-2.5">
+              <div className="flex items-center gap-2">
+                <div className="flex flex-col shrink-0">
+                  <button
+                    onClick={() => move(p.provider, -1)}
+                    disabled={idx === 0}
+                    className="w-5 h-4 flex items-center justify-center text-muted disabled:opacity-25"
+                  >
+                    <ArrowUp size={12} />
+                  </button>
+                  <button
+                    onClick={() => move(p.provider, 1)}
+                    disabled={idx === providers.length - 1}
+                    className="w-5 h-4 flex items-center justify-center text-muted disabled:opacity-25"
+                  >
+                    <ArrowDown size={12} />
+                  </button>
+                </div>
+                <span className="w-6 h-6 rounded-full bg-surface-soft text-ink-soft text-[11px] font-bold flex items-center justify-center shrink-0">
+                  {idx + 1}
+                </span>
+                <p className="flex-1 text-[13px] font-semibold text-ink">{PROVIDER_LABEL[p.provider]}</p>
+                {justSaved === p.provider && <Check size={14} className="text-green-600" />}
+                <Toggle checked={p.enabled} onChange={() => toggleEnabled(p.provider, !p.enabled)} />
+              </div>
+
+              <p className="text-[10px] text-muted px-0.5">{PROVIDER_NOTE[p.provider]}</p>
+
+              <div className="flex flex-col gap-2">
+                <input
+                  type="password"
+                  value={keyDrafts[p.provider] ?? ""}
+                  onChange={(e) => setKeyDrafts((d) => ({ ...d, [p.provider]: e.target.value }))}
+                  placeholder={p.hasKey ? `Đã lưu key ${p.maskedKey} — gõ để đổi key khác` : "Dán API key vào đây"}
+                  className="w-full rounded-xl border border-border-soft bg-surface px-2.5 py-2 text-[12px] text-ink outline-none focus:border-brand-blue"
+                />
+                <input
+                  value={modelDrafts[p.provider] ?? p.model}
+                  onChange={(e) => setModelDrafts((d) => ({ ...d, [p.provider]: e.target.value }))}
+                  placeholder="Tên model"
+                  className="w-full rounded-xl border border-border-soft bg-surface px-2.5 py-2 text-[12px] text-ink outline-none focus:border-brand-blue"
+                />
+                <button
+                  onClick={() => saveOne(p.provider)}
+                  disabled={savingKey === p.provider}
+                  className="self-end rounded-lg bg-brand-blue text-white text-[12px] font-medium px-3 py-1.5 tap-scale disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {savingKey === p.provider && <Loader2 size={12} className="animate-spin" />}
+                  Lưu
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 export default function AiSettingsPage() {
   const navigate = useNavigate();
   const { bumpDataVersion } = useAppState();
@@ -59,6 +224,8 @@ export default function AiSettingsPage() {
         </button>
         <h2 className="text-[16px] font-bold text-ink">Tuỳ chỉnh AI trả lời khách</h2>
       </div>
+
+      <ProviderSettingsPanel />
 
       <Panel
         title="Hướng dẫn thêm cho AI"
