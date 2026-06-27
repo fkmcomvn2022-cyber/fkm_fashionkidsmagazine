@@ -99,9 +99,44 @@ app.get("/api/state", async (_req, res) => {
   res.json({ state });
 });
 
+/**
+ * BUG ĐÃ SỬA (2026-06-28): PUT /api/state trước đây ghi đè (overwrite) TOÀN
+ * BỘ state bằng đúng những gì frontend gửi lên. Vì frontend chỉ poll tin
+ * nhắn/khách Facebook mới khi đang MỞ màn Hội thoại (xem ChatPage.tsx), nên
+ * nếu lúc webhook Facebook vừa ghi 1 tin nhắn mới vào state, mà sau đó BẤT KỲ
+ * thiết bị/tab nào (chưa kịp poll tin đó) làm 1 hành động ghi dữ liệu khác
+ * (tạo đơn, sửa concept...) -> persistAll() -> PUT /api/state với bản
+ * `messages`/`customers` CŨ (chưa có tin Facebook mới) -> ghi đè mất luôn tin
+ * nhắn/khách mà webhook vừa tạo, KHÔNG có lỗi gì để thấy. Đây là lý do tin
+ * nhắn test Facebook lên log "ghi vào state" thành công nhưng app không bao
+ * giờ thấy — đã được merge lại trước khi app kịp đọc.
+ *
+ * Fix: với 2 mảng `messages` và `customers` — nơi DUY NHẤT có 2 phía cùng ghi
+ * (frontend ghi tay + webhook backend ghi) — hợp nhất theo id: bản ghi nào
+ * frontend gửi lên thì dùng bản đó (frontend vẫn là nguồn đúng cho việc sửa
+ * trạng thái đã đọc/tên khách...), còn id nào CHỈ có ở server (frontend chưa
+ * kịp poll) thì GIỮ LẠI, không cho ghi đè mất. Các mảng/field khác (orders,
+ * concepts, staff...) không có ai khác ghi ngoài frontend nên vẫn ghi đè thẳng
+ * như cũ.
+ */
+function mergeArraysById(serverArr: unknown, incomingArr: unknown): unknown[] {
+  const server = Array.isArray(serverArr) ? (serverArr as { id?: string }[]) : [];
+  const incoming = Array.isArray(incomingArr) ? (incomingArr as { id?: string }[]) : [];
+  const incomingIds = new Set(incoming.map((x) => x.id));
+  const onlyOnServer = server.filter((x) => x.id && !incomingIds.has(x.id));
+  return [...incoming, ...onlyOnServer];
+}
+
 app.put("/api/state", async (req, res) => {
   try {
-    await writeState(req.body ?? {});
+    const incoming = (req.body ?? {}) as Record<string, unknown>;
+    const current = (await readState()) ?? {};
+    const merged: Record<string, unknown> = {
+      ...incoming,
+      messages: mergeArraysById(current.messages, incoming.messages),
+      customers: mergeArraysById(current.customers, incoming.customers),
+    };
+    await writeState(merged);
     res.json({ ok: true });
   } catch (err) {
     console.error("Không lưu được state:", err);
