@@ -503,6 +503,12 @@ interface GeminiResponse {
 
 const MAX_FUNCTION_CALL_ROUNDS = 4; // chặn vòng lặp vô hạn nếu AI cứ gọi hàm liên tục
 
+// Số tin nhắn gần nhất đưa vào ngữ cảnh mỗi lần gọi AI — trước đây là 12, nâng
+// lên 50 theo yêu cầu của anh (2026-06-28) để AI không "quên" những gì nó đã
+// nói/hỏi khách ở các lượt trước trong cùng 1 cuộc hội thoại dài. Áp dụng cho
+// cả Gemini và OpenAI/DeepSeek (2 chỗ dùng — xem CHAT_HISTORY_WINDOW bên dưới).
+const CHAT_HISTORY_WINDOW = 50;
+
 async function callGemini(cfg: AiProviderConfig, body: Record<string, unknown>): Promise<GeminiResponse> {
   let res: Response;
   try {
@@ -530,7 +536,7 @@ async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, sys
   // Gemini yêu cầu role đầu tiên trong `contents` là "user" — cắt từ tin khách
   // gần nhất, bỏ các tin phía trước cùng-role-liên-tiếp ở đầu nếu lịch sử bắt
   // đầu bằng tin studio (hiếm, nhưng tránh lỗi 400 từ API).
-  const recent = ctx.history.slice(-12);
+  const recent = ctx.history.slice(-CHAT_HISTORY_WINDOW);
   const firstCustomerIdx = recent.findIndex((t) => t.fromCustomer);
   const turns = firstCustomerIdx > 0 ? recent.slice(firstCustomerIdx) : recent;
   if (turns.length === 0) return null;
@@ -655,7 +661,7 @@ async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfi
   const enabledFunctions = (ctx.functions ?? []).filter((f) => f.enabled && FUNCTION_SCHEMAS[f.key]);
   const tools = enabledFunctions.length ? buildOpenAiTools(enabledFunctions) : undefined;
 
-  const recent = ctx.history.slice(-12);
+  const recent = ctx.history.slice(-CHAT_HISTORY_WINDOW);
   const firstCustomerIdx = recent.findIndex((t) => t.fromCustomer);
   const turns = firstCustomerIdx > 0 ? recent.slice(firstCustomerIdx) : recent;
   if (turns.length === 0) return null;
