@@ -23,14 +23,20 @@ interface ScheduleNavState {
   openGroupOrderIds?: string[];
   /** Đến từ ô lịch mini còn trống -> mở sẵn form "Tạo đơn hàng" với giờ này. */
   prefillTime?: string;
+  /** Đi kèm `openOrderId` — đến từ việc "Thiếu nhân sự" (TaskBoard ở Home) ->
+   * mở thẳng vào chế độ Sửa, cuộn tới phần Ekip, giống DaySummary. */
+  focusEkip?: boolean;
 }
 
 export default function SchedulePage() {
   const location = useLocation();
   const navState = location.state as ScheduleNavState | null;
-  const initialDate = navState?.date ?? "2026-06-25";
+  const initialDate = navState?.date ?? todayIso();
   const [date, setDate] = useState(initialDate);
   const [openOrder, setOpenOrder] = useState<Order | null>(null);
+  // true khi đơn này được mở từ cảnh báo "Thiếu nhân sự" — mở thẳng vào chế độ
+  // Sửa, cuộn tới phần Ekip, xem DaySummary.onResolveMissingStaff.
+  const [openOrderFocusEkip, setOpenOrderFocusEkip] = useState(false);
   const [groupOrders, setGroupOrders] = useState<{ orders: Order[]; title: string } | null>(null);
   const [collectOrder, setCollectOrder] = useState<Order | null>(null);
   const [checkedIn, setCheckedIn] = useState<Set<string>>(new Set());
@@ -63,6 +69,7 @@ export default function SchedulePage() {
     if (navState.openOrderId) {
       const entry = timeline.find((t) => t.order.id === navState.openOrderId);
       if (entry) {
+        setOpenOrderFocusEkip(!!navState.focusEkip);
         setOpenOrder(entry.order);
         handledNav.current = true;
       }
@@ -160,7 +167,14 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      <DaySummary date={date} onShowOrders={(orders, title) => setGroupOrders({ orders, title })} />
+      <DaySummary
+        date={date}
+        onShowOrders={(orders, title) => setGroupOrders({ orders, title })}
+        onResolveMissingStaff={(order) => {
+          setOpenOrderFocusEkip(true);
+          setOpenOrder(order);
+        }}
+      />
 
       {/* Trước đây chỉ là dòng thông báo tĩnh — giờ bấm vào (khi còn giờ trống)
           mở thẳng form "Tạo đơn hàng" với giờ đã gợi ý điền sẵn, để xem/dùng
@@ -199,7 +213,10 @@ export default function SchedulePage() {
             <div key={entry.order.id} className="relative">
               <AppointmentBar
                 entry={entry}
-                onOpen={setOpenOrder}
+                onOpen={(o) => {
+                  setOpenOrderFocusEkip(false);
+                  setOpenOrder(o);
+                }}
                 onCollect={setCollectOrder}
                 onCheckIn={(o) => setCheckedIn((prev) => new Set(prev).add(o.id))}
               />
@@ -213,13 +230,21 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      <OrderDetailSheet order={openOrder} onClose={() => setOpenOrder(null)} />
+      <OrderDetailSheet
+        order={openOrder}
+        onClose={() => {
+          setOpenOrder(null);
+          setOpenOrderFocusEkip(false);
+        }}
+        initialEditFocusEkip={openOrderFocusEkip}
+      />
       <GroupOrdersSheet
         orders={groupOrders?.orders ?? null}
         title={groupOrders?.title}
         onClose={() => setGroupOrders(null)}
         onOpenOrder={(order) => {
           setGroupOrders(null);
+          setOpenOrderFocusEkip(false);
           setOpenOrder(order);
         }}
       />

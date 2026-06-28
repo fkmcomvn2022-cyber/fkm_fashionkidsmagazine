@@ -10,9 +10,13 @@ interface DaySummaryProps {
    * đứng sau nó — giờ bấm vào 1 ô sẽ gọi callback này, SchedulePage mở sheet
    * liệt kê đúng các đơn liên quan (tái dùng GroupOrdersSheet đã có). */
   onShowOrders: (orders: Order[], title: string) => void;
+  /** Trước đây bấm cảnh báo "Thiếu nhân sự" chỉ mở chi tiết đơn (đọc), phải tự
+   * bấm thêm "Sửa đơn" mới gán được — giờ giải quyết thẳng: mở thẳng form sửa
+   * đơn, cuộn tới đúng phần Ekip để gán ngay. */
+  onResolveMissingStaff: (order: Order) => void;
 }
 
-export function DaySummary({ date, onShowOrders }: DaySummaryProps) {
+export function DaySummary({ date, onShowOrders, onResolveMissingStaff }: DaySummaryProps) {
   const dayOrders = ordersByDate(date).filter((o) => o.status !== "cancelled");
   const kidOrders = dayOrders.filter((o) => o.people.some((p) => p.audience === "Trẻ em"));
   const adultOrders = dayOrders.filter((o) => o.people.some((p) => p.audience === "Người lớn"));
@@ -96,7 +100,7 @@ export function DaySummary({ date, onShowOrders }: DaySummaryProps) {
               return (
                 <button
                   key={o.id}
-                  onClick={() => onShowOrders([o], `Ca ${o.time} thiếu ${missing}`)}
+                  onClick={() => onResolveMissingStaff(o)}
                   className="flex items-center justify-between gap-2 rounded-xl bg-surface/60 px-2.5 py-1.5 text-left tap-scale"
                 >
                   <span className="text-[11px] text-danger">

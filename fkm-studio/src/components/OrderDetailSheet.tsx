@@ -24,6 +24,10 @@ import type { Order, OrderStatus } from "@/types";
 interface OrderDetailSheetProps {
   order: Order | null;
   onClose: () => void;
+  /** Đến từ cảnh báo "Thiếu nhân sự" (DaySummary) — mở thẳng vào chế độ Sửa
+   * đơn, cuộn ngay tới phần Ekip, thay vì mở ra ở chế độ xem rồi phải tự bấm
+   * thêm "Sửa đơn" mới gán được nhân sự. */
+  initialEditFocusEkip?: boolean;
 }
 
 const linkItems = (links: Order["photoLinks"]) => [
@@ -37,7 +41,7 @@ const allStatuses: OrderStatus[] = [
   "new", "deposited", "scheduled", "shooting", "shot", "selecting", "editing", "delivered", "completed", "cancelled",
 ];
 
-export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
+export function OrderDetailSheet({ order, onClose, initialEditFocusEkip }: OrderDetailSheetProps) {
   const { bumpDataVersion, triggerRefresh } = useAppState();
   const [editing, setEditing] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -49,10 +53,13 @@ export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
 
   // Sheet không bị unmount khi đổi sang đơn khác (xem SchedulePage) — phải tự
   // đồng bộ lại state cục bộ theo order.id, không chỉ dựa vào useState lazy init.
+  // initialEditFocusEkip = true (đến từ cảnh báo Thiếu nhân sự) -> mở thẳng vào
+  // chế độ Sửa luôn, khỏi qua bước xem chi tiết trung gian.
   useEffect(() => {
     setItemsText((order?.photoSelection?.items ?? []).join("\n"));
     setSelectionMsg(null);
-  }, [order?.id]);
+    setEditing(!!initialEditFocusEkip);
+  }, [order?.id, initialEditFocusEkip]);
 
   if (!order) return null;
   const customer = customerById(order.customerId);
@@ -62,7 +69,7 @@ export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
   if (editing) {
     return (
       <Sheet open={!!order} onClose={() => setEditing(false)} title={`Sửa đơn ${order.code}`}>
-        <QuickOrderForm editOrder={order} onDone={() => setEditing(false)} />
+        <QuickOrderForm editOrder={order} onDone={() => setEditing(false)} focusEkip={initialEditFocusEkip} />
       </Sheet>
     );
   }

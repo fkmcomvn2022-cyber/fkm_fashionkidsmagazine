@@ -93,6 +93,25 @@ Yêu cầu gốc (anh, 2026-06-26): AI phải tự xác nhận cọc qua ảnh k
 
 **Việc anh cần làm:** vào `/settings/automation` xem/tắt-mở từng luật theo ý anh (mặc định cả 5 luật đều BẬT); nếu muốn AI tự tạo đơn + tự báo lịch trống ngay trong chat, vào `/settings/ai` bật 2 function `check_available_slots`/`create_order_from_chat` (đang mặc định TẮT vì rủi ro tạo đơn sai cao hơn 3 function cũ).
 
+### Giai đoạn 7 — Gộp nhiều nguồn khách (Instagram, TikTok Business, Zalo...) vào 1 kênh chat — CHƯA LÀM, kế hoạch để AI sau biết hướng phát triển
+
+Yêu cầu gốc (anh, 2026-06-28): muốn quản lý nhiều nguồn khách hơn (TikTok Business, Instagram...) trong CÙNG 1 khung Hội thoại như Facebook hiện tại, để có nhiều nguồn khách hơn. Quyết định lúc này: chưa làm ngay, chỉ ghi lại kế hoạch.
+
+**Kiến trúc hiện có tận dụng được:**
+- `Customer`/`Message` hiện chỉ phân biệt Facebook qua field riêng `facebookId` (xem `src/types/index.ts`, `server/src/facebook.ts`) — nên tổng quát hoá thành 1 field `channel` (`"facebook" | "instagram" | "tiktok" | "zalo"` ...) thay vì mỗi nền tảng tự thêm 1 field id riêng, để thread-list/badge nguồn dễ mở rộng.
+- `ChatPage.tsx` lấy thread từ `getConversationThreads()` (tính lại từ `messages` hiện tại, không gắn cứng Facebook) — nên KHÔNG cần đổi UI khung chat khi thêm nguồn mới, chỉ cần icon/badge nhận diện nguồn trên mỗi thread.
+- Mỗi nguồn mới cần làm riêng theo đúng pattern `facebook.ts` đã có: 1 file webhook receiver (verify signature, parse payload, tìm/tạo customer theo id riêng nền tảng, ghi message, gọi AI nếu auto-reply đang bật) + 1 hàm gửi tin riêng (API gửi tin mỗi nền tảng khác hẳn nhau, không dùng chung được `sendFacebookMessage`).
+- Cấu hình token/secret từng kênh nên theo đúng pattern Facebook/Drive đã có: nhập trong app (Cài đặt > tên kênh), Render env var chỉ là fallback — KHÔNG bắt khách phải vào lại Render mỗi lần đổi.
+
+**Lưu ý kỹ thuật theo từng nền tảng (để AI tiếp quản không mất công research lại từ đầu):**
+- **Instagram** — nên làm TRƯỚC, ít việc nhất: nếu Instagram Business Account đã liên kết với Facebook Page, dùng CHUNG hạ tầng Meta for Developers (cùng App ID, cùng cách verify `X-Hub-Signature-256`) — tái dùng tối đa code `facebook.ts`, chỉ khác cách lấy ID người gửi (IGSID) + endpoint gửi tin.
+- **TikTok Business** — rủi ro kỹ thuật cao nhất: KHÔNG có webhook nhắn tin 1-1 (DM) công khai dễ tiếp cận như Messenger; API công khai của TikTok hiện chủ yếu phục vụ quảng cáo (Marketing API) và TikTok Shop, không phải chat trực tiếp. Trước khi code, AI tiếp quản PHẢI tra cứu lại tình trạng API mới nhất (chính sách hay đổi) — nhiều khả năng phải qua giải pháp trung gian (Zapier/n8n) hoặc chưa làm được webhook trực tiếp kiểu Facebook.
+- **Zalo** — đã từng nêu ở Giai đoạn 2 ("để sau"), vẫn là ứng viên hợp lý làm cùng lúc/ngay sau Instagram vì khách Việt Nam dùng nhiều.
+
+**Thứ tự khuyến nghị:** Instagram (ít việc nhất, tái dùng code Facebook) → Zalo → TikTok (cần nghiên cứu lại khả năng kỹ thuật trước khi nhận lời làm).
+
+**Việc CHƯA chốt — AI tiếp quản phải hỏi chủ studio trước khi code:** làm nguồn nào trước trong 3 nguồn trên, có cần icon/badge phân biệt nguồn ở thread-list hay không, và AI tự trả lời (auto-reply) có áp dụng đồng nhất cho mọi nguồn hay chỉ riêng Facebook như hiện tại.
+
 ## Việc tiếp theo
 
 Giai đoạn 0, 1, 2 (phần Facebook), 3, 3.1, 4, 5, 6 đã xong phần code. Việc còn lại của Giai đoạn 2: anh deploy `server/` lên Render + khai báo webhook trên Meta for Developers — xem hướng dẫn từng bước trong `server/README.md`. Việc còn lại của Giai đoạn 3: anh lấy `GEMINI_API_KEY` (miễn phí, xem mục Giai đoạn 3 trên) và bật toggle trong app. Việc còn lại của Giai đoạn 6: xem qua `/settings/automation` + cân nhắc bật 2 function rủi ro cao hơn ở `/settings/ai` khi đã thấy yên tâm. Zalo (phần còn lại của Giai đoạn 2) để sau theo đúng thứ tự anh chọn.

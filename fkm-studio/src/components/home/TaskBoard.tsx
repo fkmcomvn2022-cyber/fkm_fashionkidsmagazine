@@ -1,34 +1,50 @@
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Wallet, CalendarClock, ImageDown, AlertTriangle, ChevronRight, Briefcase } from "lucide-react";
+import { Wallet, CalendarClock, ImageDown, AlertTriangle, ChevronRight, Briefcase, UserX } from "lucide-react";
 import { Panel } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
-import { operationTasks } from "@/data";
 import { orderById, customerById, conceptById, staffById } from "@/data";
 import { formatVND } from "@/lib/format";
 import { sendTaskReminder, sendStaffScheduleReminder } from "@/lib/messaging";
-import type { TaskType } from "@/types";
+import { computeOperationTasks } from "@/lib/operationTasks";
+import { useAppState } from "@/lib/appState";
+import type { OperationTask, TaskType } from "@/types";
 
 const taskMeta: Record<TaskType, { icon: typeof Wallet; color: string; bg: string; action: string }> = {
   remind_deposit: { icon: Wallet, color: "#f5a524", bg: "#fef3dc", action: "Nhắc cọc" },
   remind_schedule: { icon: CalendarClock, color: "#4f6df5", bg: "#e8edff", action: "Nhắc lịch" },
   remind_select_photo: { icon: ImageDown, color: "#ef5fa7", bg: "#ffe6f2", action: "Nhắc chọn ảnh" },
   remind_staff_schedule: { icon: Briefcase, color: "#1fb27a", bg: "#e3f8ee", action: "Nhắc lịch làm việc" },
+  missing_staff: { icon: UserX, color: "#f0476b", bg: "#fde6ea", action: "Gán ngay" },
   conflict: { icon: AlertTriangle, color: "#f0476b", bg: "#fde6ea", action: "Xem chi tiết" },
 };
 
 export function TaskBoard() {
   const navigate = useNavigate();
+  // Trước đây là `data/tasks.ts` — 6 dòng MẪU cố định, không bao giờ đổi theo
+  // dữ liệu thật. Giờ tính lại SỐNG từ orders/customers/staff (xem
+  // lib/operationTasks.ts) — `dataVersion` đổi mỗi khi có đơn được tạo/sửa
+  // (xem memory fkm-studio-data-write-path) nên thêm vào deps để tính lại ngay.
+  const { dataVersion } = useAppState();
+  const operationTasks = useMemo(() => { void dataVersion; return computeOperationTasks(); }, [dataVersion]);
 
-  // Mỗi loại việc bấm vào là chạy đúng hành động thật:
+  const goToOrder = (task: OperationTask) => {
+    const order = orderById(task.orderId);
+    if (!order) return;
+    navigate("/schedule", { state: { date: order.date, openOrderId: task.orderId, focusEkip: task.type === "missing_staff" } });
+  };
+
+  // Mỗi loại việc bấm nút là chạy đúng hành động thật:
   // - Nhắc cọc/nhắc lịch/nhắc chọn ảnh -> mở thẳng kênh chat của KHÁCH (Facebook
   //   nếu nguồn Facebook, còn lại Zalo) với nội dung tin nhắn soạn sẵn.
   // - Nhắc lịch làm việc -> mở kênh liên lạc MẶC ĐỊNH của nhân sự đó.
+  // - Thiếu nhân sự -> mở thẳng đơn ở chế độ Sửa, cuộn tới phần Ekip (giống
+  //   DaySummary.onResolveMissingStaff, tái dùng cờ focusEkip có sẵn).
   // - Trùng lịch -> chưa có hành động nhắn tin, mở chi tiết đơn ở trang Lịch.
-  const runTask = (task: (typeof operationTasks)[number]) => {
-    if (task.type === "conflict") {
-      const order = orderById(task.orderId);
-      if (order) navigate("/schedule", { state: { date: order.date, openOrderId: task.orderId } });
+  const runTask = (task: OperationTask) => {
+    if (task.type === "conflict" || task.type === "missing_staff") {
+      goToOrder(task);
       return;
     }
     if (task.type === "remind_staff_schedule") {
@@ -52,10 +68,7 @@ export function TaskBoard() {
           return (
             <div
               key={task.id}
-              onClick={() => {
-                const order2 = orderById(task.orderId);
-                if (order2) navigate("/schedule", { state: { date: order2.date, openOrderId: task.orderId } });
-              }}
+              onClick={() => goToOrder(task)}
               className="flex items-center gap-3 rounded-2xl border border-border-soft p-3 tap-scale cursor-pointer"
             >
               <Avatar name={avatarName} size={36} />

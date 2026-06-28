@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus, X } from "lucide-react";
 import clsx from "clsx";
 import { useAppState } from "@/lib/appState";
 import { Button } from "@/components/ui/Button";
 import { concepts, conceptById, staff, addonServices, customerById, createOrder, updateOrder, computeOrderPricing, OrderValidationError } from "@/data";
 import type { CreateOrderPersonInput, OrderValidationIssue } from "@/data/orders";
-import { formatVND } from "@/lib/format";
+import { formatVND, todayIso } from "@/lib/format";
 import type { Audience, ExtraRole, Order, OrderKind, OrderPerson, PromoType, StaffRole } from "@/types";
 
 const inputClass = "w-full rounded-2xl border border-border-soft bg-surface-soft px-3.5 py-2.5 text-sm text-ink outline-none focus:border-brand-blue";
@@ -74,6 +74,7 @@ export function QuickOrderForm({
   defaultDate,
   defaultTime,
   editOrder,
+  focusEkip,
 }: {
   onDone: () => void;
   defaultDate?: string;
@@ -82,6 +83,10 @@ export function QuickOrderForm({
    * khách (đổi khách không thuộc phạm vi sửa đơn), nút Lưu gọi updateOrder()
    * thay vì createOrder(). */
   editOrder?: Order;
+  /** Đến từ cảnh báo "Thiếu nhân sự" (DaySummary/TaskBoard) — bấm vào nên giải
+   * quyết thẳng việc đó luôn, thay vì mở form rồi người dùng phải tự cuộn tìm
+   * đúng phần Ekip. Khi true, tự cuộn tới + viền nổi bật phần Ekip lúc mount. */
+  focusEkip?: boolean;
 }) {
   const { bumpDataVersion, triggerRefresh } = useAppState();
 
@@ -91,7 +96,7 @@ export function QuickOrderForm({
   const [customerPhone, setCustomerPhone] = useState("");
   const [socialContact, setSocialContact] = useState(editOrder?.socialContact ?? "");
   const [mainDob, setMainDob] = useState(editOrder?.mainDob ?? "");
-  const [date, setDate] = useState(editOrder?.date ?? defaultDate ?? "2026-06-25");
+  const [date, setDate] = useState(editOrder?.date ?? defaultDate ?? todayIso());
   const [time, setTime] = useState(editOrder?.time ?? defaultTime ?? "09:00");
 
   const [peopleCount, setPeopleCount] = useState(editOrder?.people.length ?? 1);
@@ -140,6 +145,12 @@ export function QuickOrderForm({
   // dùng đọc rõ từng cảnh báo, bấm "Vẫn tạo đơn" mới submit lại với cờ bỏ
   // qua chặn (xem `previewOrderIssues`/`OrderValidationError` ở data/orders.ts).
   const [issues, setIssues] = useState<OrderValidationIssue[]>([]);
+
+  const ekipSectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focusEkip) return;
+    ekipSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [focusEkip]);
 
   const editCustomer = editOrder ? customerById(editOrder.customerId) : undefined;
 
@@ -437,13 +448,21 @@ export function QuickOrderForm({
       </div>
 
       {/* Ekip */}
-      <SectionTitle>Ekip thực tế của đơn</SectionTitle>
-      <p className="text-[11px] text-muted -mt-1">Photo/Makeup/Stylist tự điền theo ekip mặc định của concept (cài ở Sản phẩm &gt; Sửa concept) — đổi riêng cho đơn này nếu ca đó có thay đổi người.</p>
-      <div className="grid grid-cols-2 gap-3">
-        <StaffPicker label="Photo" role="Photo" value={photoStaffId} onChange={setPhotoStaffIdManual} />
-        <StaffPicker label="Makeup" role="Makeup" value={makeupStaffId} onChange={setMakeupStaffIdManual} />
-        <StaffPicker label="Stylist" role="Stylist" value={stylistStaffId} onChange={setStylistStaffIdManual} />
-        <StaffPicker label="Retoucher" role="Retoucher" value={retoucherId} onChange={setRetoucherId} />
+      <div
+        ref={ekipSectionRef}
+        className={clsx("flex flex-col gap-2 -mx-3 px-3 py-2 rounded-2xl transition-colors", focusEkip && "bg-danger-soft ring-2 ring-danger/40")}
+      >
+        <SectionTitle>Ekip thực tế của đơn</SectionTitle>
+        {focusEkip && (
+          <p className="text-[11px] font-semibold text-danger -mt-1">Ca này đang thiếu nhân sự — gán đủ Photo/Makeup rồi bấm Lưu ở dưới.</p>
+        )}
+        <p className="text-[11px] text-muted -mt-1">Photo/Makeup/Stylist tự điền theo ekip mặc định của concept (cài ở Sản phẩm &gt; Sửa concept) — đổi riêng cho đơn này nếu ca đó có thay đổi người.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <StaffPicker label="Photo" role="Photo" value={photoStaffId} onChange={setPhotoStaffIdManual} />
+          <StaffPicker label="Makeup" role="Makeup" value={makeupStaffId} onChange={setMakeupStaffIdManual} />
+          <StaffPicker label="Stylist" role="Stylist" value={stylistStaffId} onChange={setStylistStaffIdManual} />
+          <StaffPicker label="Retoucher" role="Retoucher" value={retoucherId} onChange={setRetoucherId} />
+        </div>
       </div>
       <div className="flex flex-col gap-2">
         {extraRoles.map((r) => (

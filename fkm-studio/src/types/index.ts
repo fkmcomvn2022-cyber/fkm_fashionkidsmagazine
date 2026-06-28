@@ -258,6 +258,7 @@ export type TaskType =
   | "remind_schedule"
   | "remind_select_photo"
   | "remind_staff_schedule"
+  | "missing_staff"
   | "conflict";
 
 export interface OperationTask {
