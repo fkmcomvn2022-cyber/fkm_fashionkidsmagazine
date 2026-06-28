@@ -301,7 +301,21 @@ export function maybeRunAutoBackup(): void {
   if (!hasPersistedData()) return;
   const settings = readAutoBackupSettings();
   if (!settings.intervalDays || settings.intervalDays <= 0) return;
-  const last = settings.lastBackupAt ? new Date(settings.lastBackupAt).getTime() : 0;
+
+  // Chưa từng tự backup -> chỉ GHI NHẬN mốc bắt đầu tính, KHÔNG tự tải file
+  // ngay lần mở đầu tiên. Trước đây thiếu nhánh này nên `last` mặc định = 0
+  // (epoch 1970) bị so với Date.now() (mốc thật, luôn lớn hơn rất nhiều) ->
+  // điều kiện "đã đến lúc" luôn đúng ngay từ lần mở đầu, khiến app tự gom
+  // TOÀN BỘ dữ liệu thật (đơn/khách/tin nhắn tích lũy nhiều tuần) ra JSON và
+  // bắt tải file ngay trên luồng chính MỖI LẦN mở app — với dữ liệu đủ lớn,
+  // việc này treo cứng trình duyệt (Chrome tự kill tab "Aw, Snap!"), lặp lại
+  // ở mọi máy/mọi mạng vì đây là lỗi logic, không phải lỗi máy/mạng/tiện ích.
+  if (!settings.lastBackupAt) {
+    writeAutoBackupSettings({ ...settings, lastBackupAt: new Date().toISOString() });
+    return;
+  }
+
+  const last = new Date(settings.lastBackupAt).getTime();
   const dueAt = last + settings.intervalDays * 24 * 60 * 60 * 1000;
   if (Date.now() < dueAt) return;
   downloadBackupFile();
