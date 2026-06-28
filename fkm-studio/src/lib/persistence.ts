@@ -167,3 +167,64 @@ export function resetToSampleData(): void {
   }
   window.location.reload();
 }
+
+/**
+ * ID gốc của dữ liệu mẫu (seed) — viết cứng, KHÔNG tính lại từ dữ liệu đang
+ * có, vì mục đích là lọc bỏ chính xác các bản ghi mẫu ban đầu này dù người
+ * dùng đã sửa/lưu gì sau đó. Mọi bản ghi tạo qua app thật (createOrder,
+ * findOrCreateCustomer, createConcept, createStaff...) đều sinh ID lớn hơn
+ * các số này (nextNumericId quét ID lớn nhất hiện có rồi +1), nên không bao
+ * giờ trùng vào nhóm này về sau.
+ */
+const SAMPLE_IDS = {
+  orders: new Set(["o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8", "o9", "o10"]),
+  customers: new Set(["u1", "u2", "u3", "u4", "u5", "u6", "u7"]),
+  concepts: new Set(["c1", "c2", "c3", "c4", "c5"]),
+  staff: new Set(["s1", "s2", "s3", "s4", "s5", "s6", "s7"]),
+  inventory: new Set(["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
+  addonServices: new Set(["sv1", "sv2", "sv3", "sv4", "sv5", "sv6", "sv7", "sv8", "sv9"]),
+  expenses: new Set(["e1", "e2", "e3", "e4", "e5"]),
+  messages: new Set(["m1", "m2", "m3", "m4", "m5"]),
+};
+
+/** Đếm số bản ghi mẫu còn lại trong từng mảng — dùng để hiển thị trước khi
+ * người dùng xác nhận xoá (xem DataCenterPage), tránh xoá "mù" không biết
+ * ảnh hưởng bao nhiêu. */
+export function countSampleData(): { label: string; count: number }[] {
+  return [
+    { label: "Đơn hàng mẫu", count: orders.filter((o) => SAMPLE_IDS.orders.has(o.id)).length },
+    { label: "Khách hàng mẫu", count: customers.filter((c) => SAMPLE_IDS.customers.has(c.id)).length },
+    { label: "Concept mẫu", count: concepts.filter((c) => SAMPLE_IDS.concepts.has(c.id)).length },
+    { label: "Nhân sự mẫu", count: staff.filter((s) => SAMPLE_IDS.staff.has(s.id)).length },
+    { label: "Trang phục/kho mẫu", count: inventory.filter((i) => SAMPLE_IDS.inventory.has(i.id)).length },
+    { label: "Dịch vụ thêm mẫu", count: addonServices.filter((s) => SAMPLE_IDS.addonServices.has(s.id)).length },
+    { label: "Chi phí mẫu", count: expenses.filter((e) => SAMPLE_IDS.expenses.has(e.id)).length },
+    { label: "Tin nhắn mẫu", count: messages.filter((m) => SAMPLE_IDS.messages.has(m.id)).length },
+  ].filter((row) => row.count > 0);
+}
+
+/**
+ * Xoá CHỈ dữ liệu mẫu ban đầu (seed) — GIỮ NGUYÊN mọi dữ liệu thật đã
+ * tạo/sửa sau đó (đơn, khách, concept, nhân sự, kho, dịch vụ, chi phí, tin
+ * nhắn mới). Khác với resetToSampleData() (xoá HẾT, quay lại y nguyên dữ
+ * liệu mẫu) — hàm này lọc đúng các ID mẫu gốc khỏi từng mảng, lưu lại, rồi
+ * tải lại trang. Dùng cho nút "Xoá dữ liệu mẫu, giữ dữ liệu thật" ở Trung
+ * tâm Dữ liệu.
+ *
+ * Lưu ý rủi ro (đã báo người dùng trước khi build): nếu có đơn THẬT đang
+ * tham chiếu 1 concept/nhân sự MẪU (vd. đơn thật chụp concept mẫu "Thu Mơ"),
+ * xoá concept/nhân sự mẫu đó sẽ làm đơn thật bị mất tên concept/nhân sự hiển
+ * thị (dữ liệu đơn không mất, chỉ mất liên kết hiển thị).
+ */
+export function clearSampleData(): void {
+  replaceArrayContents(orders, orders.filter((o) => !SAMPLE_IDS.orders.has(o.id)));
+  replaceArrayContents(customers, customers.filter((c) => !SAMPLE_IDS.customers.has(c.id)));
+  replaceArrayContents(concepts, concepts.filter((c) => !SAMPLE_IDS.concepts.has(c.id)));
+  replaceArrayContents(staff, staff.filter((s) => !SAMPLE_IDS.staff.has(s.id)));
+  replaceArrayContents(inventory, inventory.filter((i) => !SAMPLE_IDS.inventory.has(i.id)));
+  replaceArrayContents(addonServices, addonServices.filter((s) => !SAMPLE_IDS.addonServices.has(s.id)));
+  replaceArrayContents(expenses, expenses.filter((e) => !SAMPLE_IDS.expenses.has(e.id)));
+  replaceArrayContents(messages, messages.filter((m) => !SAMPLE_IDS.messages.has(m.id)));
+  persistAll();
+  window.location.reload();
+}

@@ -59,6 +59,20 @@ export function markThreadRead(customerId: string): void {
 }
 
 /**
+ * Xoá TOÀN BỘ tin nhắn của 1 khách (xoá local) — dùng cho nút "Xoá hội
+ * thoại" ở ChatPage. CHỈ xoá tin nhắn, không xoá khách hàng/đơn hàng của
+ * khách đó. Phải gọi kèm POST /api/messages/clear (xem ChatPage) để xoá luôn
+ * bên backend — nếu chỉ xoá ở đây, lượt poll /api/chat-sync kế tiếp sẽ lấy
+ * lại đúng các tin vừa xoá vì backend còn giữ (mergeArraysById bảo vệ tin
+ * server có mà frontend không gửi lên, xem server/src/index.ts).
+ */
+export function removeConversation(customerId: string): void {
+  const kept = messages.filter((m) => m.customerId !== customerId);
+  messages.length = 0;
+  messages.push(...kept);
+}
+
+/**
  * Hợp nhất tin nhắn lấy về từ backend (poll GET /api/messages, xem ChatPage)
  * vào mảng `messages` cục bộ — dedupe theo id vì backend trả TOÀN BỘ tin mỗi
  * lần, không phải chỉ tin mới. Trả về true nếu có tin mới được thêm (để gọi

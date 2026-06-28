@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ChevronLeft, MessageCircle, Send, Copy, Check, Loader2, AlertCircle } from "lucide-react";
+import { ChevronLeft, MessageCircle, Send, Copy, Check, Loader2, AlertCircle, Trash2 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import {
   getConversationThreads,
@@ -11,6 +11,7 @@ import {
   mergeRemoteCustomers,
   ordersByCustomer,
   conceptById,
+  removeConversation,
 } from "@/data";
 import { timeAgoVi, formatDateShort } from "@/lib/format";
 import { describeOpenWindows, getSuggestedHours, formatHourSuggestionsReply } from "@/lib/suggestionEngine";
@@ -69,6 +70,8 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pauseActionBusy, setPauseActionBusy] = useState(false);
+  const [confirmingDeleteConvo, setConfirmingDeleteConvo] = useState(false);
+  const [deletingConvo, setDeletingConvo] = useState(false);
   // Giai đoạn 7.2 — chỉ để tính lại "còn bao nhiêu phút" hiển thị, tick mỗi
   // 30s là đủ mượt, không cần chính xác từng giây cho 1 banner trạng thái.
   const [now, setNow] = useState(() => Date.now());
@@ -228,6 +231,33 @@ export default function ChatPage() {
     }
   };
 
+  // Xoá hội thoại — chỉ xoá tin nhắn (giữ khách hàng/đơn hàng), gọi backend
+  // trước (xem comment ở server/src/index.ts vì sao cần route riêng) rồi mới
+  // xoá local + quay về danh sách hội thoại.
+  const handleDeleteConversation = async () => {
+    if (!selected) return;
+    if (!confirmingDeleteConvo) {
+      setConfirmingDeleteConvo(true);
+      return;
+    }
+    setDeletingConvo(true);
+    try {
+      await fetch(`${BACKEND_URL}/api/messages/clear`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: selected }),
+      });
+    } catch {
+      // Backend mất mạng — vẫn xoá local, lần sau backend còn tin cũ thì poll
+      // lại sẽ hiện lại; người dùng có thể bấm xoá lại lúc có mạng.
+    }
+    removeConversation(selected);
+    bumpDataVersion();
+    setConfirmingDeleteConvo(false);
+    setDeletingConvo(false);
+    setSelected(null);
+  };
+
   if (!selected) {
     return (
       <div className="flex flex-col gap-3">
@@ -287,7 +317,23 @@ export default function ChatPage() {
             <AlertCircle size={11} /> Cần hỗ trợ
           </span>
         )}
+        <button
+          onClick={handleDeleteConversation}
+          disabled={deletingConvo}
+          className={`w-8 h-8 rounded-full flex items-center justify-center tap-scale shrink-0 disabled:opacity-50 ${
+            confirmingDeleteConvo ? "bg-danger-soft text-danger" : "bg-surface-soft text-ink-soft"
+          }`}
+          title="Xoá hội thoại"
+        >
+          {deletingConvo ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+        </button>
       </div>
+      {confirmingDeleteConvo && (
+        <p className="text-[11px] text-danger mb-2 shrink-0">
+          Bấm lại nút thùng rác để xác nhận xoá toàn bộ tin nhắn với khách này (giữ nguyên thông tin khách/đơn). Không thể hoàn tác.
+          <button onClick={() => setConfirmingDeleteConvo(false)} className="underline ml-1.5">Huỷ</button>
+        </p>
+      )}
 
       {customer?.aiPausedUntil && customer.aiPausedUntil > now ? (
         <div className="flex items-center justify-between gap-2 rounded-xl bg-warning-soft px-3 py-2 mb-2 shrink-0">

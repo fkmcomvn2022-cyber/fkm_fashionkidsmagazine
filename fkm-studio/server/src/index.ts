@@ -588,6 +588,26 @@ app.post("/api/messages/send", async (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Xoá hội thoại — xoá TOÀN BỘ tin nhắn (cả 2 chiều) của 1 khách khỏi state
+ * thật trên server. Phải có route riêng (không thể xoá bằng cách chỉ
+ * persistAll() từ frontend với mảng messages đã lọc bớt) vì PUT /api/state
+ * dùng mergeArraysById bảo vệ tin server có mà frontend chưa gửi lên — nếu
+ * không xoá ở đây, tin "đã xoá" sẽ bị merge trả lại ở lượt PUT kế tiếp.
+ */
+app.post("/api/messages/clear", async (req, res) => {
+  const { customerId } = req.body ?? {};
+  if (typeof customerId !== "string" || !customerId) {
+    res.status(400).json({ ok: false, error: "invalid_body" });
+    return;
+  }
+  const state = (await readState()) ?? {};
+  const messages = Array.isArray(state.messages) ? (state.messages as { customerId?: string }[]) : [];
+  state.messages = messages.filter((m) => m.customerId !== customerId);
+  await writeState(state);
+  res.json({ ok: true });
+});
+
 // Giai đoạn 7.2 — ChatPage cho phép xem/chỉnh trực tiếp thời gian tạm dừng AI
 // của 1 hội thoại (không cần gửi tin mới): { minutes } > 0 = dừng thêm/dừng
 // lại từ bây giờ trong N phút; { minutes: 0 } = bật lại AI ngay (xoá pause).

@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Database, FolderCheck, History, Download, Check, RefreshCcw, HardDrive, Trash2 } from "lucide-react";
+import { ArrowLeft, Database, FolderCheck, History, Download, Check, RefreshCcw, HardDrive, Trash2, Eraser } from "lucide-react";
 import { Panel } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { orders, customers, concepts, staff } from "@/data";
-import { hasPersistedData, persistAll, resetToSampleData } from "@/lib/persistence";
+import { hasPersistedData, persistAll, resetToSampleData, clearSampleData, countSampleData } from "@/lib/persistence";
 import { useAppState } from "@/lib/appState";
 
 const databases = [
@@ -29,8 +29,10 @@ export default function DataCenterPage() {
   const [activeDb, setActiveDb] = useState("db1");
   const [autoBackup, setAutoBackup] = useState(true);
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingClearSample, setConfirmingClearSample] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const { dataVersion } = useAppState();
+  const sampleBreakdown = countSampleData();
 
   const handleSaveNow = () => {
     persistAll();
@@ -44,6 +46,14 @@ export default function DataCenterPage() {
       return;
     }
     resetToSampleData();
+  };
+
+  const handleClearSample = () => {
+    if (!confirmingClearSample) {
+      setConfirmingClearSample(true);
+      return;
+    }
+    clearSampleData();
   };
 
   return (
@@ -96,6 +106,37 @@ export default function DataCenterPage() {
           </p>
         )}
       </Panel>
+
+      {sampleBreakdown.length > 0 && (
+        <Panel
+          title="Dọn dữ liệu mẫu"
+          subtitle="Xoá riêng các bản ghi mẫu (demo) có sẵn từ đầu — giữ lại mọi đơn/khách/concept/nhân sự thật anh đã tạo/sửa sau đó."
+          key={`sample-${dataVersion}`}
+        >
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {sampleBreakdown.map((row) => (
+              <span key={row.label} className="text-[11px] font-medium bg-surface-soft text-ink-soft rounded-full px-2.5 py-1">
+                {row.label}: {row.count}
+              </span>
+            ))}
+          </div>
+          <Button
+            variant={confirmingClearSample ? "danger" : "soft"}
+            size="sm"
+            icon={<Eraser size={13} />}
+            className="w-full"
+            onClick={handleClearSample}
+          >
+            {confirmingClearSample ? "Bấm lại để xác nhận xoá dữ liệu mẫu" : "Xoá dữ liệu mẫu, giữ dữ liệu thật"}
+          </Button>
+          {confirmingClearSample && (
+            <p className="text-[11px] text-danger mt-2">
+              Sẽ xoá đúng các bản ghi mẫu ở trên (kể cả Concept/Nhân sự/Kho mẫu) và tải lại trang. Nếu có đơn thật đang
+              dùng 1 concept/nhân sự mẫu, đơn đó sẽ mất tên hiển thị (không mất dữ liệu đơn). Không thể hoàn tác.
+            </p>
+          )}
+        </Panel>
+      )}
 
       <Panel title="Database" subtitle="Khu vực này đang là bản minh hoạ, chưa kết nối database thật">
         <div className="flex flex-col gap-2">
