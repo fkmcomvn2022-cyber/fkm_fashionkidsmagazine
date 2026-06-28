@@ -143,13 +143,45 @@ export function buildStudioContext(state: StateSnapshot): string {
   return parts.join("\n\n");
 }
 
-const SYSTEM_PROMPT_HEADER = `Bạn là nhân viên CSKH của FKM Studio (studio chụp ảnh), đang nhắn chuyện với khách qua Facebook Messenger. Quy tắc trả lời (LUÔN áp dụng, không được bỏ qua dù có hướng dẫn thêm nào khác):
+/**
+ * Dòng ngày/giờ THỰC TẾ (giờ Việt Nam, UTC+7) — tính lại MỖI LẦN gọi (không
+ * phải hằng số) để luôn đúng lúc gọi AI thật. Lý do cần (2026-06-28, theo
+ * phản hồi anh "AI rất hay ngáo thời gian thực"): model AI tự thân KHÔNG biết
+ * ngày hôm nay là gì (chỉ biết tới ngày huấn luyện), nên khi khách hỏi "có
+ * lịch ngày mai không"/"tuần này còn slot không" mà không có dòng này, AI dễ
+ * tính sai hẳn "hôm nay"/"ngày mai" sang một ngày hoàn toàn khác thực tế. Áp
+ * dụng cho cả AI trả lời khách (generateAiReply/generateImageReply) VÀ trợ lý
+ * nội bộ chủ studio (server/src/assistant.ts).
+ */
+export function currentVietnamTimeLine(): string {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const timeStr = now.toLocaleTimeString("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `Bây giờ là ${dateStr}, ${timeStr} (giờ Việt Nam). Dùng ĐÚNG ngày/giờ này để tính "hôm nay", "ngày mai", "tuần này"... — KHÔNG tự đoán hoặc lấy theo ngày trong dữ liệu huấn luyện của bạn.`;
+}
+
+const SYSTEM_PROMPT_HEADER_BASE = `Bạn là nhân viên CSKH của FKM Studio (studio chụp ảnh), đang nhắn chuyện với khách qua Facebook Messenger. Quy tắc trả lời (LUÔN áp dụng, không được bỏ qua dù có hướng dẫn thêm nào khác):
 - Xưng "em", gọi khách "chị/anh" (trung tính nếu chưa rõ), giọng thân thiện, lịch sự, ngắn gọn (1-3 câu, hợp văn phong chat).
 - CHỈ dùng đúng giá/tên concept/dịch vụ có trong phần "Thông tin studio" dưới đây — KHÔNG tự bịa giá, KHÔNG tự đặt ra khuyến mãi/giảm giá không có trong dữ liệu.
 - KHÔNG tự chốt giờ/ngày chụp cụ thể hoặc khẳng định "còn slot" — vì bạn không có dữ liệu lịch trống thật. Nếu khách hỏi lịch, trả lời rằng sẽ kiểm tra và nhân viên studio sẽ xác nhận lại sớm.
 - Nếu khách hỏi điều ngoài phạm vi (khiếu nại, yêu cầu đặc biệt, câu hỏi không liên quan chụp ảnh), trả lời nhẹ nhàng, không hứa hẹn cụ thể, và nói sẽ có nhân viên hỗ trợ thêm.
 - Không dùng quá nhiều emoji (tối đa 1).
 - Nếu câu trả lời có từ 2 Ý KHÁC NHAU trở lên (vd vừa báo giá vừa hỏi thêm thông tin, hoặc vừa chào vừa tư vấn), xuống dòng 2 lần (để 1 dòng trống) giữa mỗi ý — hệ thống sẽ tự tách mỗi đoạn cách nhau như vậy thành 1 tin nhắn Messenger riêng, giống người thật nhắn nhiều tin liên tiếp. Trong CÙNG 1 ý chỉ xuống dòng 1 lần hoặc viết liền, KHÔNG để trống dòng nếu câu sau vẫn thuộc cùng 1 ý.`;
+
+/** SYSTEM_PROMPT_HEADER_BASE + dòng ngày/giờ thực tính lại mỗi lần gọi. */
+function systemPromptHeader(): string {
+  return `${SYSTEM_PROMPT_HEADER_BASE}\n- ${currentVietnamTimeLine()}`;
+}
 
 // Tham số (JSON schema dạng Gemini OpenAPI-lite) của từng hàm — CỐ ĐỊNH, studio
 // không sửa được, chỉ sửa được "description" (xem AiFunctionConfig ở frontend).
@@ -799,8 +831,13 @@ export function buildCombinedCustomPrompt(settings: {
   descriptionPrompt?: string;
   productPrompt?: string;
   skillPrompt?: string;
+  // Ô thứ 5 (2026-06-28) — xem comment đầy đủ ở AiAutoReplySettings.constraintsPrompt
+  // (src/lib/aiReply.ts). Đặt ĐẦU TIÊN trong các section vì là quy tắc ưu tiên
+  // cao nhất (cách viết câu trả lời), không phải nội dung/kiến thức như 4 ô kia.
+  constraintsPrompt?: string;
 }): string {
   const sections: string[] = [];
+  if (settings.constraintsPrompt?.trim()) sections.push(`Quy tắc bắt buộc khi trả lời (không được vi phạm):\n${settings.constraintsPrompt.trim()}`);
   if (settings.personaPrompt?.trim()) sections.push(`Vai trò/nhân cách AI:\n${settings.personaPrompt.trim()}`);
   if (settings.descriptionPrompt?.trim()) sections.push(`Giới thiệu chung:\n${settings.descriptionPrompt.trim()}`);
   if (settings.productPrompt?.trim()) sections.push(`Thông tin sản phẩm thêm:\n${settings.productPrompt.trim()}`);
@@ -842,7 +879,7 @@ export function splitReplyIntoMessages(text: string): string[] {
 
 export async function generateAiReply(ctx: AiReplyContext): Promise<string | null> {
   const extra = ctx.customPrompt?.trim() ? `\n\nHướng dẫn thêm từ studio:\n${ctx.customPrompt.trim()}` : "";
-  const systemPrompt = `${SYSTEM_PROMPT_HEADER}${extra}\n\nThông tin studio:\n${ctx.studioContext}`;
+  const systemPrompt = `${systemPromptHeader()}${extra}\n\nThông tin studio:\n${ctx.studioContext}`;
 
   return withProviderFallback("text", (cfg) => {
     if (cfg.provider === "gemini") return runGeminiTextLoop(cfg, ctx, systemPrompt);
@@ -913,7 +950,7 @@ export interface ImageReplyContext {
 export async function generateImageReply(ctx: ImageReplyContext): Promise<string | null> {
   const extra = ctx.customPrompt?.trim() ? `\n\nHướng dẫn thêm từ studio:\n${ctx.customPrompt.trim()}` : "";
   const systemPrompt =
-    `${SYSTEM_PROMPT_HEADER}${extra}\n\nThông tin studio:\n${ctx.studioContext}\n\n` +
+    `${systemPromptHeader()}${extra}\n\nThông tin studio:\n${ctx.studioContext}\n\n` +
     `Khách vừa gửi 1 ảnh (không phải ảnh chuyển khoản). Hãy nhìn ảnh, hiểu nội dung, và trả lời tự nhiên, phù hợp ngữ cảnh studio chụp ảnh.`;
 
   return withProviderFallback("vision", async (cfg) => {

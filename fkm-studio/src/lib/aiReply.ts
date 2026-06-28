@@ -54,6 +54,15 @@ export interface AiAutoReplySettings {
   descriptionPrompt?: string; // Giới thiệu chung về studio/dịch vụ
   productPrompt?: string; // Ghi thêm thông tin sản phẩm KHÔNG nằm trong dữ liệu Concept thật
   skillPrompt?: string; // Mô tả tự do "AI biết làm gì" thêm — KHÔNG gọi hàm thật, chỉ là hướng dẫn trả lời
+  // Ô thứ 5 (2026-06-28, theo yêu cầu anh — giống "Constraints" của UChat) —
+  // quy tắc CỨNG về CÁCH trả lời (định dạng, giới hạn độ dài/số ý...), KHÁC
+  // skillPrompt (skillPrompt nói AI "biết làm gì", còn ô này nói AI "không
+  // được làm gì/phải làm sao khi viết câu trả lời"). Tự do sửa/xoá, KHÔNG cố
+  // định trong code — nhưng được seed sẵn 1 quy tắc khuyến nghị (xem
+  // DEFAULT_CONSTRAINTS_PROMPT) vì studio xác nhận cần ngay: không markdown.
+  // Server ghép section này ĐẦU TIÊN khi gộp 5 ô (xem buildCombinedCustomPrompt
+  // ở server/src/ai.ts) vì đây là quy tắc ưu tiên cao nhất trong số 5 ô.
+  constraintsPrompt?: string;
   functions: AiFunctionConfig[];
   // 2 cài đặt studio tự chỉnh trong app (2026-06-28), KHÔNG hardcode trong
   // code nữa — xem chỗ dùng thật ở server/src/ai.ts (AiReplyContext.historyWindow/
@@ -152,11 +161,18 @@ export const DEFAULT_AI_FUNCTIONS: AiFunctionConfig[] = [
   },
 ];
 
+// Nội dung khuyến nghị seed sẵn cho ô "Quy tắc bắt buộc" — studio tự sửa/xoá
+// tự do. Lý do cần ngay: Messenger không hiển thị markdown, AI (đặc biệt
+// Gemini/GPT) hay tự chêm **, #, gạch đầu dòng... ra ký tự rác cho khách thấy.
+export const DEFAULT_CONSTRAINTS_PROMPT =
+  "Không dùng markdown hoặc ký tự định dạng AI hay viết (**, #, -, _, danh sách gạch đầu dòng, code block...) — Messenger không hiển thị được, sẽ hiện nguyên ký tự rác cho khách thấy. Viết thuần văn bản tự nhiên như người thật đang nhắn tin.";
+
 // Mặc định TẮT — chỉ nên bật sau khi đã khai báo GEMINI_API_KEY trên server
 // (server/.env hoặc biến môi trường Render), tránh bật nhầm lúc chưa cấu hình.
 export let aiAutoReplySettings: AiAutoReplySettings = {
   enabled: false,
   customPrompt: "",
+  constraintsPrompt: DEFAULT_CONSTRAINTS_PROMPT,
   functions: DEFAULT_AI_FUNCTIONS,
   historyWindow: 50,
   temperature: 0.4,

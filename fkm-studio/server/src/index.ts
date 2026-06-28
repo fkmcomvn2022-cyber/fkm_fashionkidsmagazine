@@ -358,6 +358,7 @@ async function handleIncomingImage(
     | {
         enabled?: boolean;
         customPrompt?: string;
+        constraintsPrompt?: string;
         personaPrompt?: string;
         descriptionPrompt?: string;
         productPrompt?: string;
@@ -479,6 +480,7 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
       | {
           enabled?: boolean;
           customPrompt?: string;
+          constraintsPrompt?: string;
           personaPrompt?: string;
           descriptionPrompt?: string;
           productPrompt?: string;

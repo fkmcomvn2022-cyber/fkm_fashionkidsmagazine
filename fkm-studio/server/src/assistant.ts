@@ -16,6 +16,10 @@
  */
 import type { StateSnapshot } from "./store.js";
 import { conceptsOf, type ConceptShape } from "./chatOrders.js";
+// Dùng lại đúng helper ngày/giờ thực với ai.ts (2026-06-28, theo phản hồi anh
+// "AI rất hay ngáo thời gian thực") — trợ lý nội bộ cũng cần biết đúng "hôm
+// nay" để tính "tuần này"/"7 ngày tới" cho đúng, xem currentVietnamTimeLine().
+import { currentVietnamTimeLine } from "./ai.js";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
@@ -307,12 +311,17 @@ interface GeminiResponse {
 
 const MAX_FUNCTION_CALL_ROUNDS = 4;
 
-const SYSTEM_PROMPT = `Bạn là trợ lý AI nội bộ của FKM Studio, đang chat trực tiếp với CHỦ studio (không phải khách hàng) ngay trong app quản lý. Quy tắc:
+const SYSTEM_PROMPT_BASE = `Bạn là trợ lý AI nội bộ của FKM Studio, đang chat trực tiếp với CHỦ studio (không phải khách hàng) ngay trong app quản lý. Quy tắc:
 - Xưng "em", gọi chủ studio là "anh/chị" (trung tính nếu chưa rõ), trả lời ngắn gọn, rõ số liệu, đi thẳng vào việc — không cần lịch sự khách sáo như khi nói chuyện với khách.
 - LUÔN dùng đúng số liệu lấy được từ các hàm tra cứu (get_revenue_summary, get_upcoming_schedule, get_unpaid_orders, get_staff_workload, get_customer_info, get_concept_performance) — KHÔNG tự đoán/bịa số nếu câu hỏi cần dữ liệu thật, hãy gọi hàm phù hợp trước khi trả lời.
 - Khi không chắc khoảng ngày chủ studio muốn hỏi, cứ chọn khoảng hợp lý (vd "tuần này" = hôm nay tới 7 ngày sau) rồi nói rõ khoảng đã chọn trong câu trả lời.
 - Có thể đưa ra nhận xét/gợi ý ngắn dựa trên số liệu (vd "có 3 đơn còn nợ tiền, nên nhắc cọc trước ngày chụp"), nhưng đây chỉ là gợi ý, không tự thực hiện hành động gì (không tự sửa đơn/nhắn khách) — trợ lý này chỉ tra cứu, mọi hành động chủ studio tự làm trong app.
 - Trả lời bằng tiếng Việt, có thể dùng số liệu dạng gạch đầu dòng ngắn nếu nhiều mục, nhưng đừng dài dòng không cần thiết.`;
+
+/** SYSTEM_PROMPT_BASE + dòng ngày/giờ thực (tính lại mỗi lần gọi). */
+function systemPrompt(): string {
+  return `${SYSTEM_PROMPT_BASE}\n- ${currentVietnamTimeLine()}`;
+}
 
 export interface AssistantReplyContext {
   state: StateSnapshot;
@@ -340,7 +349,7 @@ export async function generateAssistantReply(ctx: AssistantReplyContext): Promis
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            systemInstruction: { parts: [{ text: systemPrompt() }] },
             contents,
             tools: ALL_TOOLS,
             generationConfig: { temperature: 0.3, maxOutputTokens: 500 },

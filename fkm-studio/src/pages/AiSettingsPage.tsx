@@ -294,9 +294,19 @@ export default function AiSettingsPage() {
 
       <Panel
         title="Hướng dẫn thêm cho AI"
-        subtitle='Chia theo 4 ô riêng, giống cách cấu hình AI Agent ở UChat — gõ ô nào cũng được, để trống ô nào cũng không sao. Các quy tắc an toàn (không bịa giá, không tự chốt giờ) luôn được giữ, dù anh viết gì ở đây.'
+        subtitle='Chia theo 5 ô riêng, giống cách cấu hình AI Agent ở UChat — gõ ô nào cũng được, để trống ô nào cũng không sao. Các quy tắc an toàn (không bịa giá, không tự chốt giờ) luôn được giữ, dù anh viết gì ở đây.'
       >
         <div className="flex flex-col gap-3">
+          <div>
+            <p className="text-[12px] font-medium text-ink mb-1">Constraints — Quy tắc bắt buộc</p>
+            <textarea
+              value={settings.constraintsPrompt ?? ""}
+              onChange={(e) => save({ ...settings, constraintsPrompt: e.target.value })}
+              placeholder='Vd: "Trả lời tối đa 3 ý. Không dùng markdown hoặc ký tự định dạng AI hay viết." — đây là quy tắc CỨNG về cách viết câu trả lời, ưu tiên cao nhất trong 5 ô.'
+              rows={2}
+              className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
+            />
+          </div>
           <div>
             <p className="text-[12px] font-medium text-ink mb-1">Persona — Vai trò/nhân cách AI</p>
             <textarea
