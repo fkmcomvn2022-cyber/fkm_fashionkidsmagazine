@@ -114,7 +114,7 @@ export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
     let failedCount = 0;
     for (const file of imageFiles) {
       try {
-        uploaded.push(await uploadImage(file));
+        uploaded.push(await uploadImage(file, customer ? { id: customer.id, name: customer.name } : undefined));
       } catch (err) {
         failedCount += 1;
         if (failedCount === 1) setSelectionMsg(uploadImageErrorMessage(err));

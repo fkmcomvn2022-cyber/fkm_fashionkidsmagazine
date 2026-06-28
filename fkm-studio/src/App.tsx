@@ -13,6 +13,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import AiSettingsPage from "@/pages/AiSettingsPage";
 import AutomationPage from "@/pages/AutomationPage";
 import FacebookSettingsPage from "@/pages/FacebookSettingsPage";
+import DriveSettingsPage from "@/pages/DriveSettingsPage";
 import AssistantPage from "@/pages/AssistantPage";
 import PhotoSelectionPortalPage from "@/pages/PhotoSelectionPortalPage";
 import { isNativePlatform } from "@/lib/platform";
@@ -41,6 +42,7 @@ function StudioApp() {
         {showAdvancedAiRoutes && <Route path="/settings/ai" element={<AiSettingsPage />} />}
         {showAdvancedAiRoutes && <Route path="/settings/automation" element={<AutomationPage />} />}
         {showAdvancedAiRoutes && <Route path="/settings/facebook" element={<FacebookSettingsPage />} />}
+        {showAdvancedAiRoutes && <Route path="/settings/drive" element={<DriveSettingsPage />} />}
       </Routes>
     </AppShell>
   );

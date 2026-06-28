@@ -224,17 +224,43 @@ app.put("/api/drive-config", async (req, res) => {
 
 // Upload 1 ảnh (multipart, field "image") lên Google Drive, trả về link xem
 // trực tiếp — dùng cho nút "Gửi ảnh"/kéo-thả ở ChatPage + OrderDetailSheet.
-// KHÔNG ghi gì vào state ở đây — frontend tự quyết định dùng link trả về để
-// làm gì (gửi tin nhắn qua /api/messages/send, hoặc thêm vào photoSelection
-// qua PUT /api/state như mọi field đơn hàng khác).
+// KHÔNG ghi gì vào state ở đây ngoài driveFolderId của khách (chỉ để TÁI
+// DÙNG đúng folder đã tạo, không phải dữ liệu nghiệp vụ) — frontend tự quyết
+// định dùng link trả về để làm gì (gửi tin nhắn qua /api/messages/send, hoặc
+// thêm vào photoSelection qua PUT /api/state như mọi field đơn hàng khác).
+//
+// Có gửi kèm field "customerId" (+ "customerName") -> tự tạo/tái dùng 1
+// folder con riêng cho khách đó trong folder gốc (theo yêu cầu của anh
+// 2026-06-28: "tự tạo từng thư mục riêng cho từng khách, tự link đúng với
+// từng khách luôn", giống cách app khác anh dùng tự làm khi kết nối
+// workspace) — xem googleDrive.ts. Không gửi customerId (vd ảnh không gắn
+// với khách cụ thể) thì vẫn upload thẳng vào folder gốc như trước.
 app.post("/api/upload-image", upload.single("image"), async (req, res) => {
   const file = req.file;
   if (!file) {
     res.status(400).json({ ok: false, error: "missing_file" });
     return;
   }
+  const customerId = typeof req.body?.customerId === "string" ? req.body.customerId.trim() : "";
+  const customerName = typeof req.body?.customerName === "string" ? req.body.customerName.trim() : "";
+  const state = customerId ? ((await readState()) ?? {}) : null;
+  const customers = state && Array.isArray(state.customers)
+    ? (state.customers as { id?: string; name?: string; driveFolderId?: string }[])
+    : [];
+  const customer = customerId ? customers.find((c) => c.id === customerId) : undefined;
   try {
-    const result = await uploadImageToDrive(file.buffer, file.originalname || `anh-${Date.now()}.jpg`, file.mimetype || "image/jpeg");
+    const result = await uploadImageToDrive(
+      file.buffer,
+      file.originalname || `anh-${Date.now()}.jpg`,
+      file.mimetype || "image/jpeg",
+      customerId ? { name: customerName || customer?.name || "Khách chưa rõ tên", existingFolderId: customer?.driveFolderId } : undefined,
+    );
+    // Lưu lại folderId vừa tạo/dùng để lần sau khỏi tạo trùng — chỉ ghi khi
+    // có khách thật trong state và folderId đổi khác giá trị đã lưu.
+    if (state && customer && customer.driveFolderId !== result.folderId) {
+      customer.driveFolderId = result.folderId;
+      await writeState(state);
+    }
     res.json({ ok: true, url: result.viewUrl });
   } catch (err) {
     if (err instanceof DriveNotConfiguredError) {

@@ -14,9 +14,20 @@ export class UploadImageError extends Error {
   }
 }
 
-export async function uploadImage(file: File): Promise<string> {
+/**
+ * Truyền `customer` để backend tự tạo/tái dùng 1 folder Drive con riêng cho
+ * khách đó (xem server/src/googleDrive.ts + Customer.driveFolderId) — ảnh
+ * gửi cho từng khách tự nằm đúng folder của khách, không cần anh tự sắp xếp.
+ * Không truyền (vd ảnh chưa gắn khách cụ thể) thì upload thẳng vào folder
+ * gốc đã cấu hình.
+ */
+export async function uploadImage(file: File, customer?: { id: string; name: string }): Promise<string> {
   const formData = new FormData();
   formData.append("image", file);
+  if (customer) {
+    formData.append("customerId", customer.id);
+    formData.append("customerName", customer.name);
+  }
   const res = await fetch(`${BACKEND_URL}/api/upload-image`, { method: "POST", body: formData });
   if (!res.ok) {
     let code = "upload_failed";

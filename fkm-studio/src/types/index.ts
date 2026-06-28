@@ -108,6 +108,11 @@ export interface Customer {
   // chặn khi Date.now() < aiPausedUntil, tự hết hiệu lực sau đó (không cần dọn
   // field này, để vậy cũng không sao vì luôn so sánh với thời điểm hiện tại).
   aiPausedUntil?: number;
+  // ID folder Drive riêng của khách này, do BACKEND tự tạo/quản lý (xem
+  // server/src/googleDrive.ts + facebook.ts) khi gửi/upload ảnh lần đầu cho
+  // khách — frontend KHÔNG tự đặt/sửa field này, chỉ đi kèm khi đồng bộ qua
+  // mergeRemoteCustomers (data/customers.ts).
+  driveFolderId?: string;
 }
 
 export type OrderStatus =

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, MessageCircle, Bot, Wallet, Bell, BellRing, Smartphone, ChevronRight, LogOut, Clock, CalendarClock, Wand2, Workflow, Globe, Copy, Check } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bot, Wallet, Bell, BellRing, Smartphone, ChevronRight, LogOut, Clock, CalendarClock, Wand2, Workflow, Globe, Copy, Check, HardDrive } from "lucide-react";
 import { Panel } from "@/components/ui/Card";
 import { breakWindowSettings, setBreakWindowSettings, type BreakWindowSetting } from "@/lib/scheduling";
 import { vietQRSettings, setVietQRSettings, isVietQRConfigured, type VietQRSettings } from "@/lib/payments";
@@ -13,6 +13,7 @@ import { useAppState } from "@/lib/appState";
 import { isNativePlatform } from "@/lib/platform";
 import { BACKEND_URL } from "@/lib/persistence";
 import { fetchFbConfig } from "@/lib/fbConfig";
+import { fetchDriveConfig } from "@/lib/driveConfig";
 
 const PUSH_STATE_DESC: Record<PushSupportState, string> = {
   unsupported: "Trình duyệt này không hỗ trợ thông báo đẩy",
@@ -55,6 +56,14 @@ export default function SettingsPage() {
     fetchFbConfig()
       .then((c) => setFbConnected(c.hasPageAccessToken))
       .catch(() => setFbConnected(false));
+  }, []);
+  // Tương tự fbConnected — đọc thật từ /api/drive-config (xem driveConfig.ts)
+  // để biết đã dán Service Account Key chưa, không suy đoán.
+  const [driveConnected, setDriveConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetchDriveConfig()
+      .then((c) => setDriveConnected(c.hasServiceAccountKey))
+      .catch(() => setDriveConnected(false));
   }, []);
   // Giai đoạn 3 — cờ này được mirror lên backend (xem persistAll trong
   // persistence.ts); server (server/src/index.ts) đọc lại đúng cờ này mỗi
@@ -198,6 +207,19 @@ export default function SettingsPage() {
                   icon={<Workflow size={16} />}
                   label="Automation"
                   desc="Luật tự động: nhắc cọc, nhắc lịch, nhắc chọn ảnh cho khách Facebook"
+                />
+              </button>
+              <button onClick={() => navigate("/settings/drive")} className="w-full text-left">
+                <Row
+                  icon={<HardDrive size={16} />}
+                  label="Google Drive"
+                  desc={
+                    driveConnected === null
+                      ? "Đang kiểm tra..."
+                      : driveConnected
+                        ? "Đã kết nối — bấm để xem/đổi"
+                        : "Chưa cấu hình — bấm để nhập Service Account Key/Folder ID"
+                  }
                 />
               </button>
             </>

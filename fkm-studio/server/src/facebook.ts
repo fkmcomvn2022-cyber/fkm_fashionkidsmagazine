@@ -30,6 +30,12 @@ interface CustomerShape {
   // xem comment đầy đủ ở Customer.aiPausedUntil (src/types/index.ts) +
   // AiAutoReplySettings.pauseMinutesAfterStaffReply (src/lib/aiReply.ts).
   aiPausedUntil?: number;
+  // ID folder con trong Google Drive đã tự tạo riêng cho khách này (nằm
+  // trong folder gốc đã cấu hình ở driveConfig.ts) — set 1 lần ở lần upload
+  // ảnh đầu tiên cho khách này (xem googleDrive.ts uploadImageToDrive +
+  // POST /api/upload-image ở index.ts), các lần sau tái dùng luôn, KHÔNG tạo
+  // folder mới mỗi lần gửi ảnh.
+  driveFolderId?: string;
   [key: string]: unknown;
 }
 

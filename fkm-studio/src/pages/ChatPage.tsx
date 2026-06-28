@@ -225,7 +225,7 @@ export default function ChatPage() {
     setUploadingImage(true);
     setSendError(null);
     try {
-      const imageUrl = await uploadImage(file);
+      const imageUrl = await uploadImage(file, { id: customer.id, name: customer.name });
       const res = await fetch(`${BACKEND_URL}/api/messages/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
