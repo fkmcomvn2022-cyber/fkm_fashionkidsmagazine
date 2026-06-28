@@ -61,6 +61,15 @@ export interface AiAutoReplySettings {
   // (50 tin / 0.4) — không bắt buộc phải có ở dữ liệu cũ trước bản này.
   historyWindow?: number; // số tin gần nhất đưa vào ngữ cảnh — thấp hơn = tốn ít token hơn, nhưng AI mau "quên" ý cũ trong hội thoại dài
   temperature?: number; // 0–1, độ "sáng tạo": thấp = bám sát dữ liệu thật, cao = trả lời tự nhiên/đa dạng hơn nhưng dễ lệch ý
+  // Giai đoạn 7.2 (2026-06-28, theo yêu cầu anh) — "Tự tắt AI khi nhân viên
+  // trả lời". Khi nhân viên tự tay gửi tin cho 1 khách qua nút bấm Hội thoại
+  // (POST /api/messages/send) — KHÔNG phải khi AI tự escalate_to_staff hay
+  // cron tự nhắc — server tự đặt customer.aiPausedUntil = giờ hiện tại + số
+  // phút này (xem [[fkm-studio-ai-chatbot-roadmap]]). Trong lúc đó AI ngừng tự
+  // trả lời CHO RIÊNG khách đó; hết hạn thì AI tự bật lại VÀ server tự gửi
+  // push báo lại (không im lặng — anh đã chọn rõ ở bước hỏi thiết kế). Để
+  // trống/undefined = server tự dùng mặc định 30 phút.
+  pauseMinutesAfterStaffReply?: number;
 }
 
 // 3 nghiệp vụ thật đã có sẵn trong app, an toàn để AI tự gọi (không tạo đơn

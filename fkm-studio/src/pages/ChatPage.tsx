@@ -68,6 +68,14 @@ export default function ChatPage() {
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [pauseActionBusy, setPauseActionBusy] = useState(false);
+  // Giai đoạn 7.2 — chỉ để tính lại "còn bao nhiêu phút" hiển thị, tick mỗi
+  // 30s là đủ mượt, không cần chính xác từng giây cho 1 banner trạng thái.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
   const { dataVersion, bumpDataVersion } = useAppState();
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -193,6 +201,33 @@ export default function ChatPage() {
     }
   };
 
+  // Giai đoạn 7.2 — bấm "+30 phút"/"Bật lại AI ngay"/"Tạm dừng AI" ngay trong
+  // hội thoại đang mở, không cần đợi gửi tin mới. Mutate-in-place rồi
+  // bumpDataVersion(), giống cách app này luôn ghi dữ liệu cục bộ (xem
+  // [[fkm-studio-data-write-path]]) — server là nguồn xác nhận qua response.
+  const setAiPause = async (minutes: number) => {
+    if (!customer || pauseActionBusy) return;
+    setPauseActionBusy(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/customers/${customer.id}/ai-pause`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ minutes }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { ok: boolean; aiPausedUntil: number | null };
+        if (json.ok) {
+          customer.aiPausedUntil = json.aiPausedUntil ?? undefined;
+          bumpDataVersion();
+        }
+      }
+    } catch {
+      // Không phải hành động quan trọng phải báo lỗi to — thử lại được ngay bằng cách bấm lại nút.
+    } finally {
+      setPauseActionBusy(false);
+    }
+  };
+
   if (!selected) {
     return (
       <div className="flex flex-col gap-3">
@@ -253,6 +288,40 @@ export default function ChatPage() {
           </span>
         )}
       </div>
+
+      {customer?.aiPausedUntil && customer.aiPausedUntil > now ? (
+        <div className="flex items-center justify-between gap-2 rounded-xl bg-warning-soft px-3 py-2 mb-2 shrink-0">
+          <p className="text-[11px] text-warning font-medium">
+            AI đang tạm dừng trả lời khách này — còn ~{Math.max(1, Math.ceil((customer.aiPausedUntil - now) / 60000))} phút
+          </p>
+          <div className="flex gap-1.5 shrink-0">
+            <button
+              onClick={() => setAiPause(Math.max(1, Math.ceil((customer.aiPausedUntil! - now) / 60000)) + 30)}
+              disabled={pauseActionBusy}
+              className="text-[10px] font-semibold rounded-full bg-surface px-2.5 py-1 tap-scale disabled:opacity-50"
+            >
+              +30 phút
+            </button>
+            <button
+              onClick={() => setAiPause(0)}
+              disabled={pauseActionBusy}
+              className="text-[10px] font-semibold rounded-full bg-brand-blue text-white px-2.5 py-1 tap-scale disabled:opacity-50"
+            >
+              Bật lại AI ngay
+            </button>
+          </div>
+        </div>
+      ) : (
+        customer && (
+          <button
+            onClick={() => setAiPause(30)}
+            disabled={pauseActionBusy}
+            className="text-[10px] font-medium text-muted underline mb-2 shrink-0 self-start disabled:opacity-50"
+          >
+            Tạm dừng AI 30 phút cho khách này
+          </button>
+        )
+      )}
 
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pb-3">
         {thread.map((m) => (

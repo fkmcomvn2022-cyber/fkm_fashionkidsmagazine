@@ -366,6 +366,12 @@ async function handleIncomingImage(
       }
     | undefined,
   FB_PAGE_ACCESS_TOKEN: string,
+  // Giai đoạn 7.2 — true khi khách này đang trong thời gian AI bị tạm dừng
+  // (nhân viên vừa tự trả lời). CHỈ chặn nhánh AI tự soạn trả lời ảnh —
+  // nhánh xác nhận cọc tiền định (auto_confirm_payment_screenshot) phía trên
+  // vẫn chạy bình thường, vì đó là hành động tiền định/an toàn, không phải
+  // AI "chen ngang" tự soạn câu trả lời.
+  aiPaused = false,
 ): Promise<void> {
   if (!customer.facebookId || !FB_PAGE_ACCESS_TOKEN) return;
   const img = await fetchImageAsBase64(imageUrl);
@@ -398,7 +404,7 @@ async function handleIncomingImage(
     }
   }
 
-  if (aiSettings?.enabled) {
+  if (aiSettings?.enabled && !aiPaused) {
     try {
       const reply = await generateImageReply({
         base64: img.base64,
@@ -451,6 +457,24 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
       url: "/chat",
     });
 
+    // Giai đoạn 7.2 — nhân viên vừa tự trả lời khách này gần đây (qua POST
+    // /api/messages/send hoặc nút chỉnh trong ChatPage) thì AI tạm ngừng tự
+    // trả lời CHO RIÊNG khách này. Hết hạn -> AI tự bật lại NHƯ BÌNH THƯỜNG
+    // (không cần làm gì thêm) NHƯNG phải tự gửi push báo lại (anh đã chọn rõ
+    // "không im lặng" khi chốt thiết kế) — chỉ báo 1 LẦN ngay khi phát hiện
+    // hết hạn (xóa aiPausedUntil ngay sau đó để tin tiếp theo không báo lại).
+    const now = Date.now();
+    const pausedUntil = customer.aiPausedUntil;
+    const aiPaused = typeof pausedUntil === "number" && now < pausedUntil;
+    if (typeof pausedUntil === "number" && !aiPaused) {
+      delete customer.aiPausedUntil;
+      await sendPushToAll({
+        title: "FKM Studio",
+        body: `AI đã tự bật lại trả lời ${customer.name ?? "khách"}`,
+        url: "/chat",
+      });
+    }
+
     const aiSettings = state.aiAutoReplySettings as
       | {
           enabled?: boolean;
@@ -469,7 +493,7 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
     // trả lời tự nhiên), KHÔNG đi qua nhánh trả lời chữ bên dưới (tránh gọi
     // Gemini 2 lần cho cùng 1 tin nhắn).
     if (hasImage) {
-      await handleIncomingImage(state, customer, msg.attachmentUrls[0], isAutomationEnabled, aiSettings, FB_PAGE_ACCESS_TOKEN);
+      await handleIncomingImage(state, customer, msg.attachmentUrls[0], isAutomationEnabled, aiSettings, FB_PAGE_ACCESS_TOKEN, aiPaused);
       continue;
     }
 
@@ -479,7 +503,7 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
     // mạng, Gemini từ chối...) chỉ log, KHÔNG chặn việc lưu tin khách phía
     // trên — tin khách vẫn vào hộp thư bình thường để anh tự trả lời nếu AI
     // không trả lời được.
-    if (aiSettings?.enabled && customer.facebookId && FB_PAGE_ACCESS_TOKEN) {
+    if (aiSettings?.enabled && !aiPaused && customer.facebookId && FB_PAGE_ACCESS_TOKEN) {
       try {
         const allMessages = Array.isArray(state.messages)
           ? (state.messages as { customerId?: string; fromCustomer?: boolean; text?: string }[])
@@ -528,7 +552,7 @@ app.post("/api/messages/send", async (req, res) => {
   }
   const state = (await readState()) ?? {};
   const customers = Array.isArray(state.customers)
-    ? (state.customers as { id?: string; facebookId?: string; needsHumanHelp?: boolean }[])
+    ? (state.customers as { id?: string; facebookId?: string; needsHumanHelp?: boolean; aiPausedUntil?: number }[])
     : [];
   const customer = customers.find((c) => c.id === customerId);
   if (!customer?.facebookId) {
@@ -549,8 +573,44 @@ app.post("/api/messages/send", async (req, res) => {
   // Studio (người thật) đã tự vào trả lời khách này -> coi như đã được hỗ trợ,
   // tắt cờ "Cần hỗ trợ" do AI đặt trước đó (hàm escalate_to_staff, xem ai.ts).
   if (customer.needsHumanHelp) customer.needsHumanHelp = false;
+  // Giai đoạn 7.2 — nhân viên VỪA tự tay gửi tin cho khách này qua route này
+  // (CHỈ route này — không phải escalate_to_staff/cron) -> tạm dừng AI tự trả
+  // lời CHO RIÊNG khách này N phút (mặc định 30, chỉnh ở Cài đặt > AI), để AI
+  // không chen ngang khi nhân viên đang tự xử lý hội thoại. Xem
+  // handleFacebookWebhookPayload (chặn AI lúc đang pause + tự gửi push khi
+  // pause hết hạn) và ChatPage (UI xem/chỉnh thời gian pause của hội thoại).
+  const aiSettings = state.aiAutoReplySettings as { pauseMinutesAfterStaffReply?: number } | undefined;
+  const pauseMinutes = aiSettings?.pauseMinutesAfterStaffReply ?? 30;
+  customer.aiPausedUntil = Date.now() + pauseMinutes * 60_000;
   await writeState(state);
   res.json({ ok: true });
+});
+
+// Giai đoạn 7.2 — ChatPage cho phép xem/chỉnh trực tiếp thời gian tạm dừng AI
+// của 1 hội thoại (không cần gửi tin mới): { minutes } > 0 = dừng thêm/dừng
+// lại từ bây giờ trong N phút; { minutes: 0 } = bật lại AI ngay (xoá pause).
+app.post("/api/customers/:id/ai-pause", async (req, res) => {
+  const { minutes } = req.body ?? {};
+  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0) {
+    res.status(400).json({ ok: false, error: "invalid_body" });
+    return;
+  }
+  const state = (await readState()) ?? {};
+  const customers = Array.isArray(state.customers)
+    ? (state.customers as { id?: string; aiPausedUntil?: number }[])
+    : [];
+  const customer = customers.find((c) => c.id === req.params.id);
+  if (!customer) {
+    res.status(404).json({ ok: false, error: "not_found" });
+    return;
+  }
+  if (minutes === 0) {
+    delete customer.aiPausedUntil;
+  } else {
+    customer.aiPausedUntil = Date.now() + minutes * 60_000;
+  }
+  await writeState(state);
+  res.json({ ok: true, aiPausedUntil: customer.aiPausedUntil ?? null });
 });
 
 // Frontend poll định kỳ (xem ChatPage) — trả CẢ messages VÀ customers, vì

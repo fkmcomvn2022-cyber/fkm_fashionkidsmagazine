@@ -26,6 +26,10 @@ interface CustomerShape {
   tag?: string;
   totalOrders?: number;
   totalSpent?: number;
+  // Giai đoạn 7.2 — tạm dừng AI tự trả lời cho riêng khách này (epoch ms),
+  // xem comment đầy đủ ở Customer.aiPausedUntil (src/types/index.ts) +
+  // AiAutoReplySettings.pauseMinutesAfterStaffReply (src/lib/aiReply.ts).
+  aiPausedUntil?: number;
   [key: string]: unknown;
 }
 

@@ -59,14 +59,16 @@ export function findOrCreateCustomer(name: string, phone?: string, facebookId?: 
  * cục bộ chưa có (theo id) — KHÔNG ghi đè tên/notes của khách đã có ở local,
  * vì studio có thể đã sửa ở app mà bản mirror backend chưa kịp cập nhật.
  *
- * Giai đoạn 3.1: 2 trường NGOẠI LỆ luôn lấy theo backend dù khách đã tồn tại
+ * Giai đoạn 3.1: 3 trường NGOẠI LỆ luôn lấy theo backend dù khách đã tồn tại
  * cục bộ — `needsHumanHelp` (chỉ backend đặt/xoá, qua hàm AI "escalate_to_staff"
  * hoặc khi studio gửi tin trả lời tay, xem server/src/index.ts — frontend
- * không có chỗ nào khác tự ghi cờ này nên không sợ đè mất gì) và `tag` (AI có
+ * không có chỗ nào khác tự ghi cờ này nên không sợ đè mất gì), `tag` (AI có
  * thể tự gán qua hàm "tag_customer" — chấp nhận rủi ro hiếm khi đụng với 1
  * lần studio tự đổi tag cùng lúc, vì backend luôn là bản mới nhất ngay sau
- * lượt webhook/AI vừa xử lý xong).
- * Trả về true nếu có khách mới được thêm HOẶC có cờ nào trong 2 trường trên đổi.
+ * lượt webhook/AI vừa xử lý xong), và `aiPausedUntil` (Giai đoạn 7.2 — chỉ
+ * backend đặt/xoá khi nhân viên gửi tin tay hoặc khi pause tự hết hạn, cùng
+ * lý do an toàn như needsHumanHelp).
+ * Trả về true nếu có khách mới được thêm HOẶC có cờ nào trong 3 trường trên đổi.
  */
 export function mergeRemoteCustomers(remote: Customer[]): boolean {
   const byId = new Map(customers.map((c) => [c.id, c] as const));
@@ -85,6 +87,10 @@ export function mergeRemoteCustomers(remote: Customer[]): boolean {
     }
     if (c.tag && local.tag !== c.tag) {
       local.tag = c.tag;
+      changed = true;
+    }
+    if (local.aiPausedUntil !== c.aiPausedUntil) {
+      local.aiPausedUntil = c.aiPausedUntil;
       changed = true;
     }
   }

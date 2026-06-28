@@ -270,6 +270,25 @@ export default function AiSettingsPage() {
               <span>Tự nhiên, đa dạng câu chữ</span>
             </div>
           </div>
+
+          <div className="h-px bg-border-soft" />
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[12px] font-medium text-ink">Tạm dừng AI khi nhân viên tự trả lời</p>
+              <span className="text-[12px] font-semibold text-brand-blue">{settings.pauseMinutesAfterStaffReply ?? 30} phút</span>
+            </div>
+            <input
+              type="range"
+              min={5}
+              max={120}
+              step={5}
+              value={settings.pauseMinutesAfterStaffReply ?? 30}
+              onChange={(e) => save({ ...settings, pauseMinutesAfterStaffReply: Number(e.target.value) })}
+              className="w-full"
+            />
+            <p className="text-[10px] text-muted px-0.5 mt-1">Khi anh/chị tự bấm gửi tin cho khách ở màn Hội thoại, AI tự ngừng trả lời riêng khách đó trong số phút này (để không chen ngang) — hết hạn AI tự bật lại và báo qua thông báo. Có thể chỉnh/bật lại sớm hơn ngay trong từng hội thoại.</p>
+          </div>
         </div>
       </Panel>
 
