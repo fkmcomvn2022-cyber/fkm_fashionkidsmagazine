@@ -44,6 +44,8 @@ interface MessageShape {
   // Phase 3 — tin này do AI (Gemini) tự soạn + tự gửi, không phải studio gõ
   // tay. Mirror đúng field aiGenerated ở src/types/index.ts (frontend).
   aiGenerated?: boolean;
+  // Tin kèm ảnh (nút "Gửi ảnh" ở ChatPage) — mirror imageUrl ở frontend.
+  imageUrl?: string;
 }
 
 function customersOf(state: StateSnapshot): CustomerShape[] {
@@ -157,7 +159,7 @@ export async function findOrCreateCustomerByFacebookId(
 
 export function appendMessage(
   state: StateSnapshot,
-  input: { customerId: string; channel: string; fromCustomer: boolean; text: string; aiGenerated?: boolean },
+  input: { customerId: string; channel: string; fromCustomer: boolean; text: string; aiGenerated?: boolean; imageUrl?: string },
 ): MessageShape {
   const messages = messagesOf(state);
   const message: MessageShape = {
@@ -175,6 +177,7 @@ export function appendMessage(
     time: new Date().toISOString(),
     read: !input.fromCustomer, // tin studio/AI tự gửi coi như "đã đọc" ngay, tin khách gửi vào thì chưa
     ...(input.aiGenerated ? { aiGenerated: true } : {}),
+    ...(input.imageUrl ? { imageUrl: input.imageUrl } : {}),
   };
   messages.push(message);
   return message;

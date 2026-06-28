@@ -10,6 +10,7 @@
 import "dotenv/config"; // nạp server/.env khi chạy local — khi deploy (Render/Railway) biến môi trường đặt thẳng ở dashboard, dotenv không thấy file .env thì im lặng bỏ qua, không lỗi
 import express from "express";
 import cors from "cors";
+import multer from "multer";
 import { readState, writeState } from "./store.js";
 import { addSubscription, getPublicKey, initPush, removeSubscription, sendPushToAll, subscriptionCount } from "./push.js";
 import { getPhotoSelectionForOrder, submitPhotoSelection } from "./orders.js";
@@ -18,6 +19,7 @@ import {
   fetchImageAsBase64,
   findOrCreateCustomerByFacebookId,
   parseFacebookWebhookPayload,
+  sendFacebookImage,
   sendFacebookMessage,
   verifyFacebookSignature,
 } from "./facebook.js";
@@ -33,9 +35,16 @@ import {
 } from "./ai.js";
 import { getMaskedProviders, reorderProviders, updateProviders, type AiProviderKey, type AiProviderPatch } from "./aiProviders.js";
 import { getEffectiveFbConfig, getMaskedFbConfig, updateFbConfig, type FbConfigPatch } from "./fbConfig.js";
+import { getMaskedDriveConfig, updateDriveConfig, type DriveConfigPatch } from "./driveConfig.js";
+import { uploadImageToDrive, DriveNotConfiguredError } from "./googleDrive.js";
 import { confirmDepositFromScreenshot } from "./chatOrders.js";
 import { runAutomationCron } from "./automationCron.js";
 import { generateAssistantReply, type AssistantTurn } from "./assistant.js";
+
+// Nhận ảnh upload qua multipart/form-data (nút "Gửi ảnh"/kéo-thả) — giữ
+// trong RAM (không lưu file tạm trên đĩa Render, đĩa Render KHÔNG persistent
+// giữa các lần deploy) rồi đẩy thẳng lên Google Drive, xem googleDrive.ts.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 4000);
@@ -198,6 +207,45 @@ app.put("/api/fb-config", async (req, res) => {
   }
 });
 
+// Cấu hình Google Drive (service account key + folder) — xem driveConfig.ts.
+app.get("/api/drive-config", async (_req, res) => {
+  res.json(await getMaskedDriveConfig());
+});
+
+app.put("/api/drive-config", async (req, res) => {
+  try {
+    await updateDriveConfig((req.body ?? {}) as DriveConfigPatch);
+    res.json({ ok: true, config: await getMaskedDriveConfig() });
+  } catch (err) {
+    console.error("[drive-config] Không lưu được cấu hình:", err);
+    res.status(500).json({ ok: false, error: "write_failed" });
+  }
+});
+
+// Upload 1 ảnh (multipart, field "image") lên Google Drive, trả về link xem
+// trực tiếp — dùng cho nút "Gửi ảnh"/kéo-thả ở ChatPage + OrderDetailSheet.
+// KHÔNG ghi gì vào state ở đây — frontend tự quyết định dùng link trả về để
+// làm gì (gửi tin nhắn qua /api/messages/send, hoặc thêm vào photoSelection
+// qua PUT /api/state như mọi field đơn hàng khác).
+app.post("/api/upload-image", upload.single("image"), async (req, res) => {
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ ok: false, error: "missing_file" });
+    return;
+  }
+  try {
+    const result = await uploadImageToDrive(file.buffer, file.originalname || `anh-${Date.now()}.jpg`, file.mimetype || "image/jpeg");
+    res.json({ ok: true, url: result.viewUrl });
+  } catch (err) {
+    if (err instanceof DriveNotConfiguredError) {
+      res.status(409).json({ ok: false, error: "drive_not_configured" });
+      return;
+    }
+    console.error("[upload-image] Lỗi upload Google Drive:", err);
+    res.status(502).json({ ok: false, error: "upload_failed" });
+  }
+});
+
 // Giai đoạn 8 (xem [[fkm-studio-ai-chatbot-roadmap]]) — trợ lý AI NỘI BỘ cho
 // chủ studio (xem assistant.ts). CHỈ ĐỌC state, không ghi gì lại — không cần
 // writeState() sau khi xử lý, khác hẳn các route AI khách hàng ở trên.
@@ -250,6 +298,10 @@ app.post("/api/orders/:id/photo-selection", async (req, res) => {
   const result = submitPhotoSelection(state, req.params.id, selectedUrls);
   if (!result.found) {
     res.status(404).json({ ok: false, error: "not_found" });
+    return;
+  }
+  if (result.tooMany) {
+    res.status(422).json({ ok: false, error: "too_many", maxSelectable: result.maxSelectable });
     return;
   }
   await writeState(state);
@@ -547,8 +599,10 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
 // chỉ hỗ trợ Facebook (Zalo để sau, xem roadmap). Frontend gọi route này khi
 // bấm nút gửi ở màn Hội thoại.
 app.post("/api/messages/send", async (req, res) => {
-  const { customerId, text } = req.body ?? {};
-  if (typeof customerId !== "string" || typeof text !== "string" || !text.trim()) {
+  const { customerId, text, imageUrl } = req.body ?? {};
+  const hasImage = typeof imageUrl === "string" && !!imageUrl.trim();
+  const hasText = typeof text === "string" && !!text.trim();
+  if (typeof customerId !== "string" || (!hasText && !hasImage)) {
     res.status(400).json({ ok: false, error: "invalid_body" });
     return;
   }
@@ -566,12 +620,24 @@ app.post("/api/messages/send", async (req, res) => {
     res.status(500).json({ ok: false, error: "missing_page_access_token" });
     return;
   }
-  const result = await sendFacebookMessage(customer.facebookId, text, FB_PAGE_ACCESS_TOKEN);
-  if (!result.ok) {
-    res.status(502).json({ ok: false, error: result.error });
-    return;
+  // Ảnh + chữ thì gửi 2 tin riêng (Facebook Send API không gộp ảnh+text 1
+  // tin) — ảnh trước, chữ chú thích sau cho tự nhiên.
+  if (hasImage) {
+    const imgResult = await sendFacebookImage(customer.facebookId, imageUrl, FB_PAGE_ACCESS_TOKEN);
+    if (!imgResult.ok) {
+      res.status(502).json({ ok: false, error: imgResult.error });
+      return;
+    }
+    appendMessage(state, { customerId, channel: "facebook", fromCustomer: false, text: "", imageUrl });
   }
-  appendMessage(state, { customerId, channel: "facebook", fromCustomer: false, text });
+  if (hasText) {
+    const result = await sendFacebookMessage(customer.facebookId, text, FB_PAGE_ACCESS_TOKEN);
+    if (!result.ok) {
+      res.status(502).json({ ok: false, error: result.error });
+      return;
+    }
+    appendMessage(state, { customerId, channel: "facebook", fromCustomer: false, text });
+  }
   // Studio (người thật) đã tự vào trả lời khách này -> coi như đã được hỗ trợ,
   // tắt cờ "Cần hỗ trợ" do AI đặt trước đó (hàm escalate_to_staff, xem ai.ts).
   if (customer.needsHumanHelp) customer.needsHumanHelp = false;

@@ -24,6 +24,7 @@ interface OrderShape {
   code?: string;
   customerId?: string;
   photoSelection?: PhotoSelectionShape;
+  photosToEdit?: number;
   [key: string]: unknown;
 }
 
@@ -50,6 +51,9 @@ export interface PhotoSelectionView {
   items: string[];
   selectedUrls: string[];
   completedAt?: string;
+  // Số ảnh tối đa khách được chọn — lấy từ Order.photosToEdit (ô "Ảnh cần
+  // sửa" studio nhập theo gói concept). 0/chưa nhập = không giới hạn.
+  maxSelectable?: number;
 }
 
 /** Dùng cho GET /api/orders/:id/photo-selection — cổng chọn ảnh khách mở lên
@@ -65,6 +69,7 @@ export function getPhotoSelectionForOrder(state: StateSnapshot, orderId: string)
     items: order.photoSelection?.items ?? [],
     selectedUrls: order.photoSelection?.selectedUrls ?? [],
     completedAt: order.photoSelection?.completedAt,
+    maxSelectable: order.photosToEdit && order.photosToEdit > 0 ? order.photosToEdit : undefined,
   };
 }
 
@@ -72,14 +77,22 @@ export interface SubmitPhotoSelectionResult {
   found: boolean;
   orderCode?: string;
   customerName?: string;
+  tooMany?: boolean;
+  maxSelectable?: number;
 }
 
 /** Dùng cho POST /api/orders/:id/photo-selection — khách bấm "Xác nhận chọn
  * xong". Ghi đè `selectedUrls` + đặt `completedAt` = giờ hiện tại. Không xoá
- * `items` (danh sách ảnh gốc studio đưa lên) — chỉ cập nhật phần khách chọn. */
+ * `items` (danh sách ảnh gốc studio đưa lên) — chỉ cập nhật phần khách chọn.
+ * Chặn nếu khách chọn vượt số ảnh tối đa (photosToEdit) — phòng trường hợp
+ * khách sửa request tay/bỏ qua giới hạn ở frontend. */
 export function submitPhotoSelection(state: StateSnapshot, orderId: string, selectedUrls: string[]): SubmitPhotoSelectionResult {
   const order = ordersOf(state).find((o) => o.id === orderId);
   if (!order) return { found: false };
+  const maxSelectable = order.photosToEdit && order.photosToEdit > 0 ? order.photosToEdit : undefined;
+  if (maxSelectable !== undefined && selectedUrls.length > maxSelectable) {
+    return { found: true, tooMany: true, maxSelectable };
+  }
   order.photoSelection = {
     items: order.photoSelection?.items ?? [],
     selectedUrls,

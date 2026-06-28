@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ChevronLeft, MessageCircle, Send, Copy, Check, Loader2, AlertCircle, Trash2 } from "lucide-react";
+import { ChevronLeft, MessageCircle, Send, Copy, Check, Loader2, AlertCircle, Trash2, ImagePlus } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import {
   getConversationThreads,
@@ -17,6 +17,7 @@ import { timeAgoVi, formatDateShort } from "@/lib/format";
 import { describeOpenWindows, getSuggestedHours, formatHourSuggestionsReply } from "@/lib/suggestionEngine";
 import { useAppState } from "@/lib/appState";
 import { BACKEND_URL } from "@/lib/persistence";
+import { uploadImage, uploadImageErrorMessage } from "@/lib/uploadImage";
 import type { Message } from "@/types";
 
 const templates = [
@@ -72,6 +73,9 @@ export default function ChatPage() {
   const [pauseActionBusy, setPauseActionBusy] = useState(false);
   const [confirmingDeleteConvo, setConfirmingDeleteConvo] = useState(false);
   const [deletingConvo, setDeletingConvo] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Giai đoạn 7.2 — chỉ để tính lại "còn bao nhiêu phút" hiển thị, tick mỗi
   // 30s là đủ mượt, không cần chính xác từng giây cho 1 banner trạng thái.
   const [now, setNow] = useState(() => Date.now());
@@ -201,6 +205,52 @@ export default function ChatPage() {
       setSendError("Không kết nối được tới server — kiểm tra mạng hoặc thử lại.");
     } finally {
       setSending(false);
+    }
+  };
+
+  // Nút "Gửi ảnh"/kéo-thả ảnh vào khung chat — upload lên Google Drive
+  // (server/src/googleDrive.ts) rồi gửi thật qua Facebook Send API (mở rộng
+  // /api/messages/send nhận thêm imageUrl). Giống handleSend: KHÔNG
+  // addMessage() lạc quan, chờ sync lại từ backend để lấy đúng id thật.
+  const handleSendImage = async (file: File) => {
+    if (!customer || uploadingImage) return;
+    if (!customer.facebookId) {
+      setSendError("Khách này chưa có liên hệ Facebook — chưa gửi ảnh trực tiếp được.");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setSendError("Chỉ gửi được file ảnh.");
+      return;
+    }
+    setUploadingImage(true);
+    setSendError(null);
+    try {
+      const imageUrl = await uploadImage(file);
+      const res = await fetch(`${BACKEND_URL}/api/messages/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: customer.id, imageUrl }),
+      });
+      const json = (await res.json()) as { ok: boolean; error?: string };
+      if (!json.ok) {
+        setSendError(
+          json.error === "missing_page_access_token"
+            ? "Server chưa cấu hình Page Access Token Facebook."
+            : "Gửi ảnh thất bại — thử lại.",
+        );
+        return;
+      }
+      const syncRes = await fetch(`${BACKEND_URL}/api/chat-sync`);
+      if (syncRes.ok) {
+        const syncJson = (await syncRes.json()) as { messages?: Message[]; customers?: Parameters<typeof mergeRemoteCustomers>[0] };
+        mergeRemoteCustomers(syncJson.customers ?? []);
+        mergeRemoteMessages(syncJson.messages ?? []);
+      }
+      bumpDataVersion();
+    } catch (err) {
+      setSendError(uploadImageErrorMessage(err));
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -377,6 +427,14 @@ export default function ChatPage() {
                 m.fromCustomer ? "bg-surface-soft text-ink rounded-bl-md" : "bg-brand-blue text-white rounded-br-md"
               }`}
             >
+              {m.imageUrl && (
+                <img
+                  src={m.imageUrl}
+                  alt="Ảnh đã gửi"
+                  className="rounded-xl max-w-full max-h-60 object-cover mb-1"
+                  loading="lazy"
+                />
+              )}
               {m.text}
               <div className={`flex items-center gap-1.5 text-[9px] mt-1 ${m.fromCustomer ? "text-muted" : "text-white/70"}`}>
                 {m.aiGenerated && (
@@ -401,14 +459,46 @@ export default function ChatPage() {
         ))}
       </div>
 
-      <div className="flex items-end gap-2 sticky bottom-0 bg-canvas pt-1">
+      <div
+        className={`flex items-end gap-2 sticky bottom-0 bg-canvas pt-1 rounded-2xl ${dragOver ? "ring-2 ring-brand-blue ring-offset-2 ring-offset-canvas" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const file = e.dataTransfer.files?.[0];
+          if (file) handleSendImage(file);
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleSendImage(file);
+            e.target.value = "";
+          }}
+        />
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Soạn tin nhắn hoặc chọn mẫu nhanh ở trên..."
+          placeholder="Soạn tin nhắn, kéo-thả ảnh vào đây, hoặc chọn mẫu nhanh ở trên..."
           rows={2}
           className="flex-1 rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
         />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploadingImage}
+          className="w-10 h-10 rounded-full bg-surface-soft text-ink-soft flex items-center justify-center tap-scale shrink-0 disabled:opacity-50"
+          title="Gửi ảnh"
+        >
+          {uploadingImage ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+        </button>
         <button
           onClick={copyDraft}
           className="w-10 h-10 rounded-full bg-surface-soft text-ink-soft flex items-center justify-center tap-scale shrink-0"

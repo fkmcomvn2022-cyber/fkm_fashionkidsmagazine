@@ -18,6 +18,7 @@ import {
 } from "@/data";
 import { useAppState } from "@/lib/appState";
 import { BACKEND_URL } from "@/lib/persistence";
+import { uploadImage, uploadImageErrorMessage } from "@/lib/uploadImage";
 import type { Order, OrderStatus } from "@/types";
 
 interface OrderDetailSheetProps {
@@ -43,6 +44,8 @@ export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
   const [itemsText, setItemsText] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [selectionMsg, setSelectionMsg] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(0);
 
   // Sheet không bị unmount khi đổi sang đơn khác (xem SchedulePage) — phải tự
   // đồng bộ lại state cục bộ theo order.id, không chỉ dựa vào useState lazy init.
@@ -94,6 +97,42 @@ export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
   const handleCopyLink = () => {
     navigator.clipboard?.writeText(selectionLink).catch(() => {});
     setSelectionMsg("Đã copy link cổng chọn ảnh — dán vào chat gửi khách.");
+  };
+
+  // Kéo-thả ảnh trực tiếp vào panel "Cổng chọn ảnh" — upload từng ảnh lên
+  // Google Drive (server/src/googleDrive.ts) rồi tự thêm link vào danh sách
+  // `items` hiện có (bổ sung, không xoá link đã dán tay trước đó), lưu luôn
+  // qua setOrderPhotoSelectionItems. Giới hạn số ảnh khách được CHỌN vẫn lấy
+  // từ order.photosToEdit (ô "Ảnh cần sửa") — không liên quan số ảnh studio
+  // TẢI LÊN ở đây, xem maxSelectable ở server/src/orders.ts.
+  const handleDropFiles = async (files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    setSelectionMsg(null);
+    setUploadingFiles(imageFiles.length);
+    const uploaded: string[] = [];
+    let failedCount = 0;
+    for (const file of imageFiles) {
+      try {
+        uploaded.push(await uploadImage(file));
+      } catch (err) {
+        failedCount += 1;
+        if (failedCount === 1) setSelectionMsg(uploadImageErrorMessage(err));
+      }
+    }
+    setUploadingFiles(0);
+    if (uploaded.length === 0) return;
+    const current = itemsText.split("\n").map((s) => s.trim()).filter(Boolean);
+    const merged = [...current, ...uploaded];
+    setItemsText(merged.join("\n"));
+    setOrderPhotoSelectionItems(order.id, merged);
+    bumpDataVersion();
+    triggerRefresh();
+    setSelectionMsg(
+      failedCount > 0
+        ? `Đã thêm ${uploaded.length} ảnh, ${failedCount} ảnh lỗi không gửi được.`
+        : `Đã thêm ${uploaded.length} ảnh — đừng quên copy link gửi khách.`,
+    );
   };
 
   // Backend chỉ nhận ghi (xem fkm-studio-ai-chatbot-roadmap) — khi khách chọn
@@ -245,8 +284,30 @@ export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
         )}
 
         <div>
-          <p className="text-xs font-semibold text-ink-soft mb-2">Cổng chọn ảnh cho khách</p>
-          <div className="rounded-2xl border border-border-soft p-3 flex flex-col gap-2.5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-ink-soft">Cổng chọn ảnh cho khách</p>
+            <p className="text-[11px] text-muted">
+              Giới hạn khách chọn: {order.photosToEdit && order.photosToEdit > 0 ? `${order.photosToEdit} ảnh` : "không giới hạn"}
+            </p>
+          </div>
+          <div
+            className={`rounded-2xl border p-3 flex flex-col gap-2.5 transition-colors ${
+              dragOver ? "border-brand-blue bg-brand-blue-soft" : "border-border-soft"
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (e.dataTransfer.files?.length) handleDropFiles(e.dataTransfer.files);
+            }}
+          >
+            <p className="text-[11px] text-muted">
+              {dragOver ? "Thả ảnh vào đây để tự upload..." : "Kéo-thả ảnh vào đây để tự upload, hoặc dán link từng ảnh dưới (mỗi dòng 1 ảnh)"}
+            </p>
             <textarea
               value={itemsText}
               onChange={(e) => setItemsText(e.target.value)}
@@ -254,6 +315,9 @@ export function OrderDetailSheet({ order, onClose }: OrderDetailSheetProps) {
               rows={3}
               className="w-full rounded-xl border border-border-soft bg-surface-soft px-3 py-2 text-xs text-ink outline-none focus:border-brand-blue resize-none"
             />
+            {uploadingFiles > 0 && (
+              <p className="text-[11px] text-brand-blue font-medium">Đang upload {uploadingFiles} ảnh...</p>
+            )}
             <div className="flex gap-2">
               <Button variant="soft" size="sm" className="flex-1" onClick={handleSaveItems}>
                 Lưu danh sách ảnh

@@ -1,1 +1,1 @@
-{"root":["./src/ai.ts","./src/automationCron.ts","./src/availability.ts","./src/chatOrders.ts","./src/facebook.ts","./src/index.ts","./src/orders.ts","./src/push.ts","./src/store.ts"],"version":"6.0.3"}
+{"root":["./src/ai.ts","./src/aiProviders.ts","./src/assistant.ts","./src/automationCron.ts","./src/availability.ts","./src/chatOrders.ts","./src/driveConfig.ts","./src/facebook.ts","./src/fbConfig.ts","./src/googleDrive.ts","./src/index.ts","./src/orders.ts","./src/push.ts","./src/store.ts"],"version":"6.0.3"}

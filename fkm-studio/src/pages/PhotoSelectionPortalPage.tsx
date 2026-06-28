@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Check, ImageOff, Loader2 } from "lucide-react";
+import { Heart, ImageOff, Loader2, Check } from "lucide-react";
 import { BACKEND_URL } from "@/lib/persistence";
 
 /**
@@ -16,6 +16,9 @@ interface SelectionData {
   items: string[];
   selectedUrls: string[];
   completedAt?: string;
+  // Số ảnh tối đa được chọn (theo gói concept, ô "Ảnh cần sửa" studio nhập
+  // trong đơn) — undefined = không giới hạn.
+  maxSelectable?: number;
 }
 
 type LoadState = "loading" | "ready" | "not_found" | "error";
@@ -27,6 +30,7 @@ export default function PhotoSelectionPortalPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [justSubmitted, setJustSubmitted] = useState(false);
+  const [limitHit, setLimitHit] = useState(false);
 
   useEffect(() => {
     if (!orderId) {
@@ -51,11 +55,22 @@ export default function PhotoSelectionPortalPage() {
       .catch(() => setState("error"));
   }, [orderId]);
 
+  const maxSelectable = data?.maxSelectable;
+
   const toggle = (url: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(url)) next.delete(url);
-      else next.add(url);
+      if (next.has(url)) {
+        next.delete(url);
+        setLimitHit(false);
+      } else {
+        if (maxSelectable !== undefined && next.size >= maxSelectable) {
+          setLimitHit(true);
+          return prev;
+        }
+        next.add(url);
+        setLimitHit(false);
+      }
       return next;
     });
   };
@@ -72,6 +87,8 @@ export default function PhotoSelectionPortalPage() {
       if (res.ok) {
         setJustSubmitted(true);
         setData((prev) => (prev ? { ...prev, selectedUrls: Array.from(selected), completedAt: new Date().toISOString() } : prev));
+      } else if (res.status === 422) {
+        setLimitHit(true);
       }
     } finally {
       setSubmitting(false);
@@ -115,13 +132,24 @@ export default function PhotoSelectionPortalPage() {
 
   return (
     <PortalShell title={data.orderCode} subtitle={data.customerName}>
-      <p className="text-xs text-muted mb-3">
-        Chọn những ảnh anh/chị muốn lấy, sau đó bấm "Xác nhận đã chọn xong" ở dưới. Có thể mở lại link này để sửa lựa chọn trước khi studio bắt đầu sửa ảnh.
+      <p className="text-xs text-muted mb-1">
+        Bấm vào ảnh để thả tim chọn{maxSelectable !== undefined ? ` (tối đa ${maxSelectable} ảnh)` : ""}, sau đó bấm "Xác nhận đã chọn xong" ở dưới. Có thể mở lại link này để sửa lựa chọn trước khi studio bắt đầu sửa ảnh.
+      </p>
+
+      <p className="text-xs font-semibold text-ink mb-3">
+        Đã chọn {selected.size}
+        {maxSelectable !== undefined ? `/${maxSelectable}` : ""} ảnh
       </p>
 
       {justSubmitted && (
         <div className="rounded-2xl bg-success/10 text-success text-xs font-medium px-3 py-2.5 mb-3 flex items-center gap-2">
           <Check size={14} /> Đã gửi lựa chọn cho studio — cảm ơn anh/chị!
+        </div>
+      )}
+
+      {limitHit && maxSelectable !== undefined && (
+        <div className="rounded-2xl bg-danger/10 text-danger text-xs font-medium px-3 py-2.5 mb-3">
+          Gói này chỉ được chọn tối đa {maxSelectable} ảnh — hãy bỏ chọn 1 ảnh khác trước khi chọn thêm.
         </div>
       )}
 
@@ -138,11 +166,11 @@ export default function PhotoSelectionPortalPage() {
             >
               <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
               <span
-                className={`absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center ${
-                  isSelected ? "bg-brand-blue text-white" : "bg-black/30 text-white/80"
+                className={`absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center ${
+                  isSelected ? "bg-white" : "bg-black/30"
                 }`}
               >
-                {isSelected && <Check size={14} />}
+                <Heart size={15} className={isSelected ? "text-rose-500 fill-rose-500" : "text-white/80"} />
               </span>
             </button>
           );

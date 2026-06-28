@@ -318,6 +318,10 @@ export interface Message {
   // Giai đoạn 3 — tin này do AI tự soạn + tự gửi (không phải studio gõ tay).
   // Dùng để hiển thị nhãn "AI" ở Hội thoại, không ảnh hưởng logic gửi/nhận.
   aiGenerated?: boolean;
+  // Tin có kèm ảnh (nút "Gửi ảnh"/kéo-thả ở ChatPage) — link Google Drive
+  // công khai (xem server/src/googleDrive.ts). `text` vẫn có thể có (chú
+  // thích kèm ảnh) hoặc rỗng nếu chỉ gửi ảnh.
+  imageUrl?: string;
 }
 
 export interface ConversationThread {
