@@ -115,6 +115,14 @@ export async function findOrCreateCustomerByFacebookId(
   state: StateSnapshot,
   psid: string,
   pageAccessToken: string,
+  // Tên/avatar lấy TRỰC TIẾP từ payload webhook (entry[].standby hoặc
+  // entry[].messaging — xem parseFacebookWebhookPayload) — App cá nhân
+  // không qua App Review nên field `profile_pic` của Graph API
+  // /{PSID}?fields=... gần như luôn bị Meta chặn (cần Advanced Access riêng,
+  // xem comment ở fetchFacebookProfile). Một số payload webhook (đặc biệt
+  // kênh standby) Facebook tự gửi kèm sender.name/sender.profile_pic — nếu
+  // có thì DÙNG LUÔN, khỏi cần gọi Graph API, né được rào Advanced Access.
+  payloadHint?: { name?: string; avatar?: string },
 ): Promise<CustomerShape> {
   const customers = customersOf(state);
   const existing = customers.find((c) => c.facebookId === psid);
@@ -123,15 +131,21 @@ export async function findOrCreateCustomerByFacebookId(
     // khi có đoạn gọi Graph API lấy hồ sơ thật, hoặc lần tạo đầu Facebook từ
     // chối lấy hồ sơ) — thử lấy lại mỗi khi khách nhắn tin tiếp, để tự "vá"
     // dần, không bị kẹt vĩnh viễn với "Khách Facebook" như khách tạo trước
-    // bản fix này.
+    // bản fix này. Ưu tiên payloadHint (free, không qua Graph) trước.
     if (!existing.avatar || existing.name === "Khách Facebook") {
-      const profile = await fetchFacebookProfile(psid, pageAccessToken);
-      if (profile?.name) existing.name = profile.name;
-      if (profile?.avatar) existing.avatar = profile.avatar;
+      if (payloadHint?.name) existing.name = payloadHint.name;
+      if (payloadHint?.avatar) existing.avatar = payloadHint.avatar;
+      if (!existing.avatar || existing.name === "Khách Facebook") {
+        const profile = await fetchFacebookProfile(psid, pageAccessToken);
+        if (profile?.name) existing.name = profile.name;
+        if (profile?.avatar) existing.avatar = profile.avatar;
+      }
     }
     return existing;
   }
-  const profile = await fetchFacebookProfile(psid, pageAccessToken);
+  const profile = payloadHint?.name || payloadHint?.avatar
+    ? payloadHint
+    : await fetchFacebookProfile(psid, pageAccessToken);
   const customer: CustomerShape = {
     // BUG (2026-06-28, vòng 2): trước đây dùng nextId("fbu", customers) — đếm
     // tăng dần dựa trên DANH SÁCH KHÁCH HIỆN CÓ TRÊN SERVER. Nhưng Render free
@@ -208,30 +222,55 @@ export interface IncomingFacebookMessage {
   psid: string;
   text?: string;
   attachmentUrls: string[];
+  // Tên/avatar Facebook gửi kèm NGAY trong payload webhook (nếu có) — xem
+  // comment đầy đủ ở findOrCreateCustomerByFacebookId (payloadHint).
+  senderNameHint?: string;
+  senderAvatarHint?: string;
 }
 
 /**
  * Parse payload webhook Messenger thành danh sách tin nhắn khách gửi vào —
  * Facebook gửi cùng 1 webhook cho nhiều loại event (tin nhắn, đã giao, đã
- * đọc, postback nút...), nên phải lọc đúng `entry[].messaging[].message`,
- * bỏ qua các event khác (delivery/read receipt không có nội dung tin nhắn).
+ * đọc, postback nút...), nên phải lọc đúng `[].message`, bỏ qua các event
+ * khác (delivery/read receipt không có nội dung tin nhắn).
+ *
+ * Đọc CẢ 2 cổng `entry[].messaging` (kênh chính — app đang giữ quyền trả
+ * lời) VÀ `entry[].standby` (kênh chờ — Handover Protocol, khi app không
+ * phải chủ luồng hội thoại tại thời điểm đó). App cá nhân không qua App
+ * Review của anh đã tick quyền nhận cả 2 cổng này trên Facebook Developer —
+ * trước đây code chỉ đọc `messaging`, bỏ sót hẳn `standby` nên tin/khách gửi
+ * qua cổng đó coi như mất tích, không lỗi gì để thấy.
  */
 export function parseFacebookWebhookPayload(body: unknown): IncomingFacebookMessage[] {
+  type RawEvent = {
+    sender?: { id?: string; name?: string; profile_pic?: string };
+    message?: { text?: string; attachments?: { type?: string; payload?: { url?: string } }[] };
+  };
   const result: IncomingFacebookMessage[] = [];
   const entries = (body as { entry?: unknown[] })?.entry ?? [];
   for (const entry of entries) {
-    const messaging = (entry as { messaging?: unknown[] })?.messaging ?? [];
-    for (const event of messaging) {
-      const e = event as {
-        sender?: { id?: string };
-        message?: { text?: string; attachments?: { type?: string; payload?: { url?: string } }[] };
-      };
-      const psid = e.sender?.id;
-      if (!psid || !e.message) continue;
-      const attachmentUrls = (e.message.attachments ?? [])
+    const e = entry as { messaging?: unknown[]; standby?: unknown[] };
+    // Cùng logic xử lý cho cả 2 cổng — chỉ khác tên field trên payload gốc.
+    const channels: RawEvent[] = [...((e.messaging ?? []) as RawEvent[]), ...((e.standby ?? []) as RawEvent[])];
+    for (const ev of channels) {
+      const psid = ev.sender?.id;
+      if (!psid || !ev.message) continue;
+      const attachmentUrls = (ev.message.attachments ?? [])
         .map((a) => a.payload?.url)
         .filter((u): u is string => !!u);
-      result.push({ psid, text: e.message.text, attachmentUrls });
+      // Facebook không LUÔN gửi sender.name/profile_pic — log nguyên `sender`
+      // 1 lần mỗi tin để biết thực tế Tài khoản/App này có được Facebook gửi
+      // kèm hay không (xem findOrCreateCustomerByFacebookId dùng làm hint).
+      if (ev.sender?.name || ev.sender?.profile_pic) {
+        console.log("[facebook webhook] Payload có kèm sender.name/profile_pic:", JSON.stringify(ev.sender));
+      }
+      result.push({
+        psid,
+        text: ev.message.text,
+        attachmentUrls,
+        senderNameHint: ev.sender?.name,
+        senderAvatarHint: ev.sender?.profile_pic,
+      });
     }
   }
   return result;

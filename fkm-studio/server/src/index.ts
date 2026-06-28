@@ -513,7 +513,10 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
   const isAutomationEnabled = (key: string) => automationRules.find((r) => r.key === key)?.enabled ?? true;
 
   for (const msg of incoming) {
-    const customer = await findOrCreateCustomerByFacebookId(state, msg.psid, FB_PAGE_ACCESS_TOKEN);
+    const customer = await findOrCreateCustomerByFacebookId(state, msg.psid, FB_PAGE_ACCESS_TOKEN, {
+      name: msg.senderNameHint,
+      avatar: msg.senderAvatarHint,
+    });
     const hasImage = msg.attachmentUrls.length > 0;
     const text = msg.text ?? (hasImage ? "[Đã gửi ảnh]" : "");
     if (!text) {
