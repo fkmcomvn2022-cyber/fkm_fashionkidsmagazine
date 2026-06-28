@@ -1,43 +1,103 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Database, FolderCheck, History, Download, Check, RefreshCcw, HardDrive, Trash2, Eraser } from "lucide-react";
+import {
+  ArrowLeft,
+  FolderCog,
+  RefreshCcw,
+  HardDrive,
+  Trash2,
+  Eraser,
+  AlertCircle,
+  CheckCircle2,
+  Upload,
+} from "lucide-react";
 import { Panel } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { orders, customers, concepts, staff } from "@/data";
-import { hasPersistedData, persistAll, resetToSampleData, clearSampleData, countSampleData } from "@/lib/persistence";
+import {
+  hasPersistedData,
+  persistAll,
+  resetToSampleData,
+  clearSampleData,
+  countSampleData,
+  downloadBackupFile,
+  parseBackupFile,
+  restoreSnapshot,
+  countSnapshot,
+  getAutoBackupSettings,
+  setAutoBackupIntervalDays,
+  type PersistedSnapshot,
+} from "@/lib/persistence";
 import { useAppState } from "@/lib/appState";
+import { isNativePlatform } from "@/lib/platform";
+import { fetchDriveConfig, type MaskedDriveConfig } from "@/lib/driveConfig";
 
-const databases = [
-  { id: "db1", name: "FKM_Production_2026", active: true, lastSync: "2 phút trước" },
-  { id: "db2", name: "FKM_Demo_Sandbox", active: false, lastSync: "1 ngày trước" },
-];
-
-const driveFolders = [
-  { name: "Database", status: "Đã kết nối" },
-  { name: "Backup", status: "Đã kết nối" },
-  { name: "Ảnh khách", status: "Đã kết nối" },
-];
-
-const backups = [
-  { id: "b1", time: "25/06/2026 06:00", size: "12.4 MB", type: "Tự động" },
-  { id: "b2", time: "24/06/2026 06:00", size: "12.1 MB", type: "Tự động" },
-  { id: "b3", time: "23/06/2026 14:32", size: "11.9 MB", type: "Thủ công" },
+const AUTO_BACKUP_OPTIONS: { days: number; label: string }[] = [
+  { days: 0, label: "Tắt" },
+  { days: 1, label: "Mỗi ngày" },
+  { days: 7, label: "Mỗi tuần" },
+  { days: 30, label: "Mỗi tháng" },
 ];
 
 export default function DataCenterPage() {
   const navigate = useNavigate();
-  const [activeDb, setActiveDb] = useState("db1");
-  const [autoBackup, setAutoBackup] = useState(true);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [confirmingClearSample, setConfirmingClearSample] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [backupNotice, setBackupNotice] = useState(false);
+  const [driveConfig, setDriveConfig] = useState<MaskedDriveConfig | "loading" | "error">("loading");
+  const [pendingImport, setPendingImport] = useState<Partial<PersistedSnapshot> | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [autoBackup, setAutoBackup] = useState(getAutoBackupSettings());
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { dataVersion } = useAppState();
   const sampleBreakdown = countSampleData();
+
+  useEffect(() => {
+    fetchDriveConfig()
+      .then(setDriveConfig)
+      .catch(() => setDriveConfig("error"));
+  }, []);
 
   const handleSaveNow = () => {
     persistAll();
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 1800);
+  };
+
+  const handleDownloadBackup = () => {
+    downloadBackupFile();
+    setBackupNotice(true);
+    setTimeout(() => setBackupNotice(false), 1800);
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // cho phép chọn lại đúng file đó lần sau nếu huỷ
+    if (!file) return;
+    const result = await parseBackupFile(file);
+    if (!result.ok) {
+      setImportError(result.error);
+      setPendingImport(null);
+      return;
+    }
+    setImportError(null);
+    setPendingImport(result.snapshot);
+  };
+
+  const handleConfirmImport = () => {
+    if (!pendingImport) return;
+    restoreSnapshot(pendingImport); // tự tải lại trang sau khi ghi
+  };
+
+  const handleCancelImport = () => {
+    setPendingImport(null);
+    setImportError(null);
+  };
+
+  const handleSetAutoBackupDays = (days: number) => {
+    setAutoBackupIntervalDays(days);
+    setAutoBackup(getAutoBackupSettings());
   };
 
   const handleReset = () => {
@@ -138,79 +198,138 @@ export default function DataCenterPage() {
         </Panel>
       )}
 
-      <Panel title="Database" subtitle="Khu vực này đang là bản minh hoạ, chưa kết nối database thật">
-        <div className="flex flex-col gap-2">
-          {databases.map((db) => (
-            <button
-              key={db.id}
-              onClick={() => setActiveDb(db.id)}
-              className="flex items-center gap-3 rounded-2xl border border-border-soft p-3 text-left tap-scale"
-            >
-              <span className="w-9 h-9 rounded-xl bg-brand-blue-soft text-brand-blue flex items-center justify-center shrink-0">
-                <Database size={16} />
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-semibold text-ink truncate">{db.name}</p>
-                <p className="text-[11px] text-muted mt-0.5">Đồng bộ {db.lastSync}</p>
-              </div>
-              {activeDb === db.id && (
-                <span className="w-6 h-6 rounded-full bg-brand-blue text-white flex items-center justify-center shrink-0">
-                  <Check size={13} />
-                </span>
+      <Panel
+        title="Google Drive (ảnh khách)"
+        subtitle="Trạng thái thật — nơi ảnh khách được upload lên khi tạo folder riêng theo khách"
+      >
+        {driveConfig === "loading" && <p className="text-[12px] text-muted">Đang kiểm tra...</p>}
+        {driveConfig === "error" && (
+          <div className="flex items-start gap-2.5 rounded-2xl border border-border-soft p-3">
+            <AlertCircle size={16} className="text-danger shrink-0 mt-0.5" />
+            <p className="text-[12px] text-ink-soft">
+              Không gọi được server backend để kiểm tra. Server chưa chạy, hoặc máy này chưa kết nối được tới backend.
+            </p>
+          </div>
+        )}
+        {driveConfig !== "loading" && driveConfig !== "error" && (
+          <div className="flex items-start gap-2.5 rounded-2xl border border-border-soft p-3">
+            {driveConfig.hasServiceAccountKey ? (
+              <CheckCircle2 size={16} className="text-success shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle size={16} className="text-warning shrink-0 mt-0.5" />
+            )}
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium text-ink">
+                {driveConfig.hasServiceAccountKey ? "Đã cấu hình Service Account" : "Chưa cấu hình Service Account"}
+              </p>
+              {driveConfig.hasServiceAccountKey ? (
+                <p className="text-[11px] text-muted mt-0.5 break-all">
+                  {driveConfig.serviceAccountEmail || "(không rõ email)"} · Folder: {driveConfig.folderId || "(chưa đặt folder gốc)"}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted mt-0.5">
+                  Upload ảnh khách sẽ lỗi cho tới khi dán Service Account key vào đây.
+                </p>
               )}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2 mt-3">
-          <Button variant="soft" size="sm" className="flex-1">Tạo database mới</Button>
-          <Button variant="ghost" size="sm" className="flex-1">Đổi tên</Button>
-        </div>
-      </Panel>
-
-      <Panel title="Google Drive" subtitle="Bản minh hoạ — chưa kết nối Google Drive thật, ảnh/dữ liệu chưa được đồng bộ lên đây">
-        <div className="flex flex-col gap-2">
-          {driveFolders.map((f) => (
-            <div key={f.name} className="flex items-center justify-between rounded-2xl border border-border-soft px-3 py-2.5">
-              <div className="flex items-center gap-2.5">
-                <FolderCheck size={16} className="text-success" />
-                <span className="text-[13px] font-medium text-ink">{f.name}</span>
-              </div>
-              <span className="text-[11px] font-medium text-success">{f.status}</span>
             </div>
-          ))}
-        </div>
+          </div>
+        )}
+        {!isNativePlatform() && (
+          <Button
+            variant="soft"
+            size="sm"
+            icon={<FolderCog size={13} />}
+            className="w-full mt-3"
+            onClick={() => navigate("/settings/drive")}
+          >
+            Mở Cấu hình Google Drive
+          </Button>
+        )}
       </Panel>
 
       <Panel
         title="Sao lưu (Backup)"
-        subtitle={autoBackup ? "Bản minh hoạ — backup thật hiện chỉ là lưu trên trình duyệt ở mục phía trên" : "Backup tự động đang tắt"}
-        action={
-          <button
-            onClick={() => setAutoBackup((v) => !v)}
-            className={`text-[11px] font-semibold rounded-full px-2.5 py-1 ${autoBackup ? "bg-success-soft text-success" : "bg-surface-soft text-muted"}`}
-          >
-            {autoBackup ? "Đang bật" : "Đang tắt"}
-          </button>
-        }
+        subtitle="Xuất file .json chứa toàn bộ dữ liệu — anh tự lưu giữ (Drive, USB, máy khác...). Có thể tự tải theo lịch mỗi lần mở app."
       >
-        <Button variant="primary" size="sm" icon={<RefreshCcw size={13} />} className="w-full mb-3">
-          Tạo backup thủ công ngay
+        <Button variant="primary" size="sm" icon={<RefreshCcw size={13} />} className="w-full" onClick={handleDownloadBackup}>
+          {backupNotice ? "Đã tải file!" : "Tải file backup (.json) ngay"}
         </Button>
-        <div className="flex flex-col gap-2">
-          {backups.map((b) => (
-            <div key={b.id} className="flex items-center justify-between rounded-2xl border border-border-soft px-3 py-2.5">
-              <div className="flex items-center gap-2.5">
-                <History size={15} className="text-muted" />
-                <div>
-                  <p className="text-[12px] font-medium text-ink">{b.time}</p>
-                  <p className="text-[10px] text-muted">{b.type} · {b.size}</p>
-                </div>
-              </div>
-              <button className="w-7 h-7 rounded-full bg-surface-soft flex items-center justify-center tap-scale">
-                <Download size={12} />
+
+        <div className="mt-3">
+          <p className="text-[12px] font-medium text-ink">Tự tải backup theo lịch</p>
+          <div className="flex gap-1.5 mt-1.5">
+            {AUTO_BACKUP_OPTIONS.map((opt) => (
+              <button
+                key={opt.days}
+                onClick={() => handleSetAutoBackupDays(opt.days)}
+                className={`flex-1 text-[11px] font-medium rounded-xl py-1.5 tap-scale ${
+                  autoBackup.intervalDays === opt.days
+                    ? "bg-ink text-white"
+                    : "bg-surface-soft text-ink-soft"
+                }`}
+              >
+                {opt.label}
               </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted mt-1.5">
+            {autoBackup.intervalDays === 0
+              ? "Đang tắt — chỉ tải khi anh bấm nút trên."
+              : `Tự kiểm tra mỗi lần mở app: nếu đã đủ ${autoBackup.intervalDays} ngày từ lần trước, tự tải file mới. ${
+                  autoBackup.lastBackupAt
+                    ? `Lần tự backup gần nhất: ${new Date(autoBackup.lastBackupAt).toLocaleString("vi-VN")}.`
+                    : "Chưa tự backup lần nào."
+                }`}
+          </p>
+          <p className="text-[10px] text-muted mt-1">
+            Lưu ý: app web/PWA không chạy nền được lúc đã tắt hẳn — đây là kiểm tra mỗi lần mở app, không phải lịch chạy nền của hệ điều hành.
+          </p>
+        </div>
+
+        <div className="mt-3 pt-3 border-t border-border-soft">
+          <p className="text-[12px] font-medium text-ink">Nhập (khôi phục) từ file backup</p>
+          <p className="text-[11px] text-muted mt-0.5 mb-2">
+            Chọn 1 file .json đã tải ở trên (máy này hoặc máy khác) để ghi đè dữ liệu hiện tại.
+          </p>
+          <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleFileSelected} className="hidden" />
+          <Button
+            variant="soft"
+            size="sm"
+            icon={<Upload size={13} />}
+            className="w-full"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Chọn file backup (.json)
+          </Button>
+          {importError && (
+            <div className="flex items-start gap-2 mt-2 rounded-2xl border border-border-soft p-2.5">
+              <AlertCircle size={14} className="text-danger shrink-0 mt-0.5" />
+              <p className="text-[11px] text-ink-soft">{importError}</p>
             </div>
-          ))}
+          )}
+          {pendingImport && (
+            <div className="mt-2 rounded-2xl border border-border-soft p-3">
+              <p className="text-[12px] font-medium text-ink mb-1.5">File này chứa:</p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {countSnapshot(pendingImport).map((row) => (
+                  <span key={row.label} className="text-[11px] font-medium bg-surface-soft text-ink-soft rounded-full px-2.5 py-1">
+                    {row.label}: {row.count}
+                  </span>
+                ))}
+              </div>
+              <p className="text-[11px] text-danger mb-2">
+                Xác nhận sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại trên thiết bị này bằng dữ liệu trong file rồi tải lại trang. Không thể hoàn tác.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" className="flex-1" onClick={handleCancelImport}>
+                  Huỷ
+                </Button>
+                <Button variant="danger" size="sm" className="flex-1" onClick={handleConfirmImport}>
+                  Xác nhận nhập, ghi đè
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </Panel>
     </div>

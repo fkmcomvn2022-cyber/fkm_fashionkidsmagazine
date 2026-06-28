@@ -39,7 +39,7 @@ const STORAGE_KEY = "fkm-studio-data-v1";
 // lặp lại logic đọc biến môi trường ở nhiều nơi.
 export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:4000";
 
-interface PersistedSnapshot {
+export interface PersistedSnapshot {
   orders: Order[];
   customers: Customer[];
   concepts: Concept[];
@@ -80,33 +80,40 @@ export function loadPersisted(): void {
 
   try {
     const snap = JSON.parse(raw) as Partial<PersistedSnapshot>;
-    replaceArrayContents(orders, snap.orders);
-    replaceArrayContents(customers, snap.customers);
-    replaceArrayContents(concepts, snap.concepts);
-    replaceArrayContents(staff, snap.staff);
-    replaceArrayContents(inventory, snap.inventory);
-    replaceArrayContents(addonServices, snap.addonServices);
-    replaceArrayContents(expenses, snap.expenses);
-    replaceArrayContents(messages, snap.messages);
-    replaceArrayContents(crewSettlements, snap.crewSettlements);
-    if (snap.breakWindowSettings) setBreakWindowSettings(snap.breakWindowSettings);
-    if (snap.vietQRSettings) setVietQRSettings(snap.vietQRSettings);
-    if (snap.reminderSettings) setReminderSettings(snap.reminderSettings);
-    if (snap.aiAutoReplySettings) setAiAutoReplySettings(snap.aiAutoReplySettings);
-    if (snap.automationSettings) setAutomationSettings(snap.automationSettings);
+    applySnapshot(snap);
   } catch (err) {
     console.warn("Dữ liệu đã lưu bị lỗi, dùng lại dữ liệu mẫu.", err);
   }
 }
 
-/**
- * Lưu toàn bộ dữ liệu hiện tại vào trình duyệt — gọi sau MỌI lần ghi dữ liệu
- * thật (hooked vào appState.bumpDataVersion(), xem appState.tsx). Lỗi khi lưu
- * (vd. hết dung lượng localStorage) chỉ cảnh báo ra console, không chặn luồng
- * nghiệp vụ đang chạy (đơn vẫn tạo được dù lưu thất bại).
- */
-export function persistAll(): void {
-  const snapshot: PersistedSnapshot = {
+/** Ghi 1 snapshot (đã parse) đè lên các mảng/biến dữ liệu sống hiện tại —
+ * dùng chung cho loadPersisted() (đọc localStorage lúc khởi động) và
+ * restoreSnapshot() (nhập file backup, xem dưới). Field nào không có trong
+ * snapshot thì giữ nguyên giá trị hiện tại (replaceArrayContents tự bỏ qua
+ * nếu không phải Array). */
+function applySnapshot(snap: Partial<PersistedSnapshot>): void {
+  replaceArrayContents(orders, snap.orders);
+  replaceArrayContents(customers, snap.customers);
+  replaceArrayContents(concepts, snap.concepts);
+  replaceArrayContents(staff, snap.staff);
+  replaceArrayContents(inventory, snap.inventory);
+  replaceArrayContents(addonServices, snap.addonServices);
+  replaceArrayContents(expenses, snap.expenses);
+  replaceArrayContents(messages, snap.messages);
+  replaceArrayContents(crewSettlements, snap.crewSettlements);
+  if (snap.breakWindowSettings) setBreakWindowSettings(snap.breakWindowSettings);
+  if (snap.vietQRSettings) setVietQRSettings(snap.vietQRSettings);
+  if (snap.reminderSettings) setReminderSettings(snap.reminderSettings);
+  if (snap.aiAutoReplySettings) setAiAutoReplySettings(snap.aiAutoReplySettings);
+  if (snap.automationSettings) setAutomationSettings(snap.automationSettings);
+}
+
+/** Gom đúng các mảng/biến dữ liệu thật hiện tại thành 1 snapshot — dùng chung
+ * cho persistAll() (lưu localStorage + mirror backend) và downloadBackupFile()
+ * (xuất file JSON cho người dùng tự giữ). Tách riêng để 2 nơi luôn lấy đúng
+ * cùng 1 bộ dữ liệu, không lặp code. */
+function buildSnapshot(): PersistedSnapshot {
+  return {
     orders,
     customers,
     concepts,
@@ -122,12 +129,183 @@ export function persistAll(): void {
     aiAutoReplySettings,
     automationSettings,
   };
+}
+
+/**
+ * Lưu toàn bộ dữ liệu hiện tại vào trình duyệt — gọi sau MỌI lần ghi dữ liệu
+ * thật (hooked vào appState.bumpDataVersion(), xem appState.tsx). Lỗi khi lưu
+ * (vd. hết dung lượng localStorage) chỉ cảnh báo ra console, không chặn luồng
+ * nghiệp vụ đang chạy (đơn vẫn tạo được dù lưu thất bại).
+ */
+export function persistAll(): void {
+  const snapshot = buildSnapshot();
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   } catch (err) {
     console.warn("Không thể lưu dữ liệu vào trình duyệt (có thể do hết dung lượng).", err);
   }
   mirrorToBackend(snapshot);
+}
+
+/**
+ * Xuất TOÀN BỘ dữ liệu thật hiện tại ra 1 file .json để người dùng tự lưu giữ
+ * (Drive, USB, máy khác...) — đây là cơ chế "backup" THẬT duy nhất hiện có,
+ * thay cho danh sách backup giả từng hiển thị ở Trung tâm Dữ liệu. Tải lại
+ * file này vào app cần làm thủ công qua loadPersisted (chưa có UI "nhập file"
+ * — nếu cần, làm sau, không nằm trong lần sửa này).
+ */
+export function downloadBackupFile(): void {
+  const snapshot = buildSnapshot();
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `fkm-studio-backup-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Đọc + kiểm tra sơ bộ 1 file backup .json do người dùng chọn (xem
+ * downloadBackupFile) — KHÔNG ghi gì cả, chỉ trả về snapshot đã parse để
+ * DataCenterPage hiển thị xem trước (bao nhiêu đơn/khách/...) trước khi
+ * người dùng bấm xác nhận thật (xem restoreSnapshot). Trả lỗi rõ ràng nếu
+ * file không phải JSON hợp lệ hoặc không giống cấu trúc backup của app này.
+ */
+export async function parseBackupFile(
+  file: File,
+): Promise<{ ok: true; snapshot: Partial<PersistedSnapshot> } | { ok: false; error: string }> {
+  let raw: string;
+  try {
+    raw = await file.text();
+  } catch {
+    return { ok: false, error: "Không đọc được file." };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: "File không đúng định dạng JSON." };
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, error: "File không đúng cấu trúc backup của FKM Studio." };
+  }
+
+  const snap = parsed as Partial<PersistedSnapshot>;
+  const knownKeys: (keyof PersistedSnapshot)[] = [
+    "orders",
+    "customers",
+    "concepts",
+    "staff",
+    "inventory",
+    "addonServices",
+    "expenses",
+    "messages",
+    "crewSettlements",
+  ];
+  const hasAnyKnownField = knownKeys.some((key) => key in snap);
+  if (!hasAnyKnownField) {
+    return { ok: false, error: "File không chứa dữ liệu FKM Studio nào nhận ra được." };
+  }
+
+  return { ok: true, snapshot: snap };
+}
+
+/** Đếm số bản ghi trong 1 snapshot đã parse (xem parseBackupFile) — dùng để
+ * hiển thị xem trước cho người dùng trước khi xác nhận nhập, theo đúng style
+ * countSampleData() ở dưới. */
+export function countSnapshot(snap: Partial<PersistedSnapshot>): { label: string; count: number }[] {
+  return [
+    { label: "Đơn hàng", count: snap.orders?.length ?? 0 },
+    { label: "Khách hàng", count: snap.customers?.length ?? 0 },
+    { label: "Concept", count: snap.concepts?.length ?? 0 },
+    { label: "Nhân sự", count: snap.staff?.length ?? 0 },
+    { label: "Trang phục/kho", count: snap.inventory?.length ?? 0 },
+    { label: "Dịch vụ thêm", count: snap.addonServices?.length ?? 0 },
+    { label: "Chi phí", count: snap.expenses?.length ?? 0 },
+    { label: "Tin nhắn", count: snap.messages?.length ?? 0 },
+  ].filter((row) => row.count > 0);
+}
+
+/**
+ * Ghi đè TOÀN BỘ dữ liệu hiện tại bằng 1 snapshot đã parse từ file backup
+ * (xem parseBackupFile) — dùng cho nút "Nhập file backup" ở Trung tâm Dữ
+ * liệu. KHÔNG THỂ HOÀN TÁC (mất hết dữ liệu hiện tại trên thiết bị này, thay
+ * bằng dữ liệu trong file) — luôn phải để người dùng xem trước (countSnapshot)
+ * và xác nhận trước khi gọi hàm này. Sau khi ghi, lưu lại + mirror backend +
+ * tải lại trang để mọi màn hình đọc đúng dữ liệu mới từ đầu.
+ */
+export function restoreSnapshot(snap: Partial<PersistedSnapshot>): void {
+  applySnapshot(snap);
+  persistAll();
+  window.location.reload();
+}
+
+const AUTO_BACKUP_KEY = "fkm-studio-autobackup-v1";
+
+export interface AutoBackupSettings {
+  /** Số ngày giữa 2 lần tự tải file backup — 0 = tắt. */
+  intervalDays: number;
+  /** ISO timestamp lần tự backup gần nhất (null = chưa từng tự backup). */
+  lastBackupAt: string | null;
+}
+
+function readAutoBackupSettings(): AutoBackupSettings {
+  try {
+    const raw = localStorage.getItem(AUTO_BACKUP_KEY);
+    if (raw) return JSON.parse(raw) as AutoBackupSettings;
+  } catch {
+    // bỏ qua, dùng mặc định
+  }
+  return { intervalDays: 7, lastBackupAt: null };
+}
+
+function writeAutoBackupSettings(settings: AutoBackupSettings): void {
+  try {
+    localStorage.setItem(AUTO_BACKUP_KEY, JSON.stringify(settings));
+  } catch {
+    // bỏ qua — không chặn luồng chính
+  }
+}
+
+/** Đọc cấu hình backup tự động hiện tại — dùng để hiển thị ở Trung tâm Dữ
+ * liệu (tần suất đang chọn + lần tự backup gần nhất). */
+export function getAutoBackupSettings(): AutoBackupSettings {
+  return readAutoBackupSettings();
+}
+
+/** Đổi tần suất tự backup (0 = tắt, hoặc số ngày). Không tự backup ngay khi
+ * đổi — lần tự backup tiếp theo sẽ tính từ lastBackupAt cũ (hoặc ngay lần mở
+ * app kế tiếp nếu trước đó đang tắt/chưa từng chạy). */
+export function setAutoBackupIntervalDays(days: number): void {
+  writeAutoBackupSettings({ ...readAutoBackupSettings(), intervalDays: days });
+}
+
+/**
+ * Gọi 1 lần mỗi khi app khởi động (xem main.tsx) — đây là cơ chế "backup tự
+ * động theo lịch" THẬT của app: vì là web app/PWA chạy trong trình duyệt,
+ * không có cách nào chạy nền lúc app đã tắt hẳn, nên "tự động" ở đây nghĩa
+ * là "tự kiểm tra mỗi lần mở app, nếu đã đủ lâu thì tự tải file backup mới" —
+ * không phải lịch chạy nền thật ở cấp hệ điều hành. Nếu đã ≥ intervalDays
+ * ngày kể từ lần tự backup trước (hoặc chưa từng tự backup), tự tải file
+ * .json mới (như bấm nút "Tải file backup" tay) rồi ghi lại thời điểm.
+ * intervalDays = 0 (đã tắt) hoặc chưa có dữ liệu thật nào lưu thì không làm
+ * gì (tránh tải file backup toàn dữ liệu mẫu vô nghĩa).
+ */
+export function maybeRunAutoBackup(): void {
+  if (!hasPersistedData()) return;
+  const settings = readAutoBackupSettings();
+  if (!settings.intervalDays || settings.intervalDays <= 0) return;
+  const last = settings.lastBackupAt ? new Date(settings.lastBackupAt).getTime() : 0;
+  const dueAt = last + settings.intervalDays * 24 * 60 * 60 * 1000;
+  if (Date.now() < dueAt) return;
+  downloadBackupFile();
+  writeAutoBackupSettings({ ...settings, lastBackupAt: new Date().toISOString() });
 }
 
 /** Bắn snapshot lên backend (server/) — best-effort, im lặng nếu backend
