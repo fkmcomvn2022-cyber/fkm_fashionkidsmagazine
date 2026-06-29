@@ -20,6 +20,7 @@ import {
   findOrCreateCustomerByFacebookId,
   parseFacebookWebhookPayload,
   sendFacebookImage,
+  sendFacebookImageFile,
   sendFacebookMessage,
   verifyFacebookSignature,
 } from "./facebook.js";
@@ -271,6 +272,52 @@ app.post("/api/upload-image", upload.single("image"), async (req, res) => {
     console.error("[upload-image] Lỗi upload Google Drive:", err);
     res.status(502).json({ ok: false, error: "upload_failed" });
   }
+});
+
+// Gửi ẢNH cho khách TRỰC TIẾP qua Facebook (nút "Gửi ảnh" trong hội thoại) —
+// upload thẳng file lên FB Send API (sendFacebookImageFile), KHÔNG qua Google
+// Drive (đơn giản + khỏi phụ thuộc cấu hình Drive). `thumb` (data URL ảnh thu
+// nhỏ do client tạo) chỉ để hiển thị lại trong hội thoại của app, gọn nhẹ.
+app.post("/api/messages/send-image", upload.single("image"), async (req, res) => {
+  const file = req.file;
+  const customerId = typeof req.body?.customerId === "string" ? req.body.customerId.trim() : "";
+  const thumb = typeof req.body?.thumb === "string" ? req.body.thumb : "";
+  if (!file || !customerId) {
+    res.status(400).json({ ok: false, error: "invalid_body" });
+    return;
+  }
+  const state = (await readState()) ?? {};
+  const customers = Array.isArray(state.customers)
+    ? (state.customers as { id?: string; facebookId?: string; needsHumanHelp?: boolean }[])
+    : [];
+  const customer = customers.find((c) => c.id === customerId);
+  if (!customer?.facebookId) {
+    res.status(400).json({ ok: false, error: "no_facebook_id" });
+    return;
+  }
+  const { pageAccessToken: FB_PAGE_ACCESS_TOKEN } = await getEffectiveFbConfig();
+  if (!FB_PAGE_ACCESS_TOKEN) {
+    res.status(500).json({ ok: false, error: "missing_page_access_token" });
+    return;
+  }
+  const sent = await sendFacebookImageFile(
+    customer.facebookId,
+    file.buffer,
+    file.mimetype || "image/jpeg",
+    file.originalname || `anh-${Date.now()}.jpg`,
+    FB_PAGE_ACCESS_TOKEN,
+  );
+  if (!sent.ok) {
+    console.error("[send-image] Facebook từ chối gửi ảnh:", sent.error);
+    res.status(502).json({ ok: false, error: "fb_send_failed" });
+    return;
+  }
+  // Lưu vào hội thoại: dùng thumbnail (nếu có) làm imageUrl để hiện lại; studio
+  // tự gửi tin coi như đã hỗ trợ -> tắt cờ "Cần hỗ trợ" như nhánh gửi chữ.
+  appendMessage(state, { customerId, channel: "facebook", fromCustomer: false, text: "", imageUrl: thumb || undefined });
+  if (customer.needsHumanHelp) customer.needsHumanHelp = false;
+  await writeState(state);
+  res.json({ ok: true });
 });
 
 // Giai đoạn 8 (xem [[fkm-studio-ai-chatbot-roadmap]]) — trợ lý AI NỘI BỘ cho

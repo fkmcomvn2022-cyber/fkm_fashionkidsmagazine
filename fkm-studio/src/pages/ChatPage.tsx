@@ -17,7 +17,7 @@ import { timeAgoVi, formatDateShort } from "@/lib/format";
 import { describeOpenWindows, getSuggestedHours, formatHourSuggestionsReply } from "@/lib/suggestionEngine";
 import { useAppState } from "@/lib/appState";
 import { BACKEND_URL } from "@/lib/persistence";
-import { uploadImage, uploadImageErrorMessage } from "@/lib/uploadImage";
+import { fileToThumbnailDataUrl } from "@/lib/imageThumb";
 import { customerAvatarSrc } from "@/lib/avatar";
 import type { Message } from "@/types";
 
@@ -264,18 +264,27 @@ export default function ChatPage() {
     setUploadingImage(true);
     setSendError(null);
     try {
-      const imageUrl = await uploadImage(file, { id: customer.id, name: customer.name });
-      const res = await fetch(`${BACKEND_URL}/api/messages/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerId: customer.id, imageUrl }),
-      });
+      // Tạo ảnh thu nhỏ để hiện lại trong hội thoại (ảnh GỐC vẫn gửi nguyên cho
+      // khách). Lỗi tạo thumbnail thì vẫn gửi, chỉ là không có ảnh xem lại.
+      let thumb = "";
+      try {
+        thumb = await fileToThumbnailDataUrl(file);
+      } catch {
+        /* bỏ qua */
+      }
+      const form = new FormData();
+      form.append("image", file);
+      form.append("customerId", customer.id);
+      if (thumb) form.append("thumb", thumb);
+      const res = await fetch(`${BACKEND_URL}/api/messages/send-image`, { method: "POST", body: form });
       const json = (await res.json()) as { ok: boolean; error?: string };
       if (!json.ok) {
         setSendError(
           json.error === "missing_page_access_token"
             ? "Server chưa cấu hình Page Access Token Facebook."
-            : "Gửi ảnh thất bại — thử lại.",
+            : json.error === "no_facebook_id"
+              ? "Khách này chưa có liên hệ Facebook — chưa gửi ảnh được."
+              : "Gửi ảnh thất bại — thử lại.",
         );
         return;
       }
@@ -286,8 +295,8 @@ export default function ChatPage() {
         mergeRemoteMessages(syncJson.messages ?? []);
       }
       bumpDataVersion();
-    } catch (err) {
-      setSendError(uploadImageErrorMessage(err));
+    } catch {
+      setSendError("Gửi ảnh thất bại — kiểm tra mạng hoặc thử lại.");
     } finally {
       setUploadingImage(false);
     }

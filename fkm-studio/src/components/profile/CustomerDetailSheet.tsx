@@ -6,7 +6,7 @@ import { StatusPill } from "@/components/ui/Badge";
 import { formatVND, formatDateShort } from "@/lib/format";
 import { customerAvatarSrc } from "@/lib/avatar";
 import { useAppState } from "@/lib/appState";
-import { uploadImage, uploadImageErrorMessage } from "@/lib/uploadImage";
+import { fileToThumbnailDataUrl } from "@/lib/imageThumb";
 import { ordersByCustomer, conceptById } from "@/data";
 import type { Customer } from "@/types";
 
@@ -48,13 +48,19 @@ export function CustomerDetailSheet({ customer, onClose }: { customer: Customer 
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setEditErr("Chỉ chọn được file ảnh.");
+      return;
+    }
     setUploading(true);
     setEditErr(null);
     try {
-      const url = await uploadImage(file, { id: customer.id, name: customer.name });
+      // Ảnh đại diện nhỏ -> nén thành thumbnail data URL ngay trên máy, lưu
+      // thẳng vào customer.avatar (KHÔNG cần Google Drive).
+      const url = await fileToThumbnailDataUrl(file, 240, 0.7);
       setAvatar(url);
-    } catch (ex) {
-      setEditErr(uploadImageErrorMessage(ex));
+    } catch {
+      setEditErr("Không xử lý được ảnh, thử ảnh khác.");
     } finally {
       setUploading(false);
     }

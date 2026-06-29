@@ -400,6 +400,38 @@ export async function sendFacebookMessage(
  * Send API — dùng để gửi mã QR chuyển khoản (img.vietqr.io trả thẳng URL
  * ảnh, xem [[fkm-studio-data-write-path]] phần VietQR) kèm tin nhắc cọc.
  */
+/**
+ * Gửi ảnh cho khách bằng cách UPLOAD THẲNG file lên Facebook Send API (multipart
+ * `filedata`) — KHÔNG cần link công khai / KHÔNG qua Google Drive. Dùng cho nút
+ * "Gửi ảnh" trong hội thoại (chọn ảnh từ máy là gửi luôn). Node 22 có sẵn
+ * FormData/Blob/fetch toàn cục nên không cần thư viện ngoài.
+ */
+export async function sendFacebookImageFile(
+  psid: string,
+  buffer: Buffer,
+  mimeType: string,
+  filename: string,
+  pageAccessToken: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const form = new FormData();
+    form.append("recipient", JSON.stringify({ id: psid }));
+    form.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: true } } }));
+    form.append("filedata", new Blob([buffer], { type: mimeType || "image/jpeg" }), filename || "anh.jpg");
+    const res = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      return { ok: false, error: errText };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function sendFacebookImage(
   psid: string,
   imageUrl: string,
