@@ -10,6 +10,19 @@
  * (xoá mẫu vĩnh viễn) và demoView (ẩn/hiện mẫu tạm thời theo công tắc DEMO/THẬT)
  * cùng dùng 1 nguồn, không lặp và không tạo import vòng.
  */
+// Cờ "đang ẩn dữ liệu mẫu" (chế độ THẬT) — đặt ở file lá này (không import gì)
+// để cả demoView (nơi bật/tắt) lẫn data/messages, data/customers (nơi merge dữ
+// liệu từ server) cùng đọc được mà KHÔNG tạo import vòng. Nhờ vậy lượt
+// /api/chat-sync kéo dữ liệu mẫu (đã mirror lên server) về cũng bị bỏ qua khi
+// đang ở chế độ THẬT — không thì THẬT vẫn hiện tin/khách mẫu (vô lý).
+let sampleHidden = false;
+export function isSampleHidden(): boolean {
+  return sampleHidden;
+}
+export function setSampleHidden(hidden: boolean): void {
+  sampleHidden = hidden;
+}
+
 export const SAMPLE_IDS = {
   orders: new Set(["o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8", "o9", "o10"]),
   customers: new Set(["u1", "u2", "u3", "u4", "u5", "u6", "u7"]),

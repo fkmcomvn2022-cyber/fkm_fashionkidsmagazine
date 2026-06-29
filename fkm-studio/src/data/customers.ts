@@ -1,5 +1,6 @@
 import type { Customer } from "@/types";
 import { nextNumericId } from "@/lib/nextId";
+import { SAMPLE_IDS, isSampleHidden } from "@/lib/sampleIds";
 
 export const customers: Customer[] = [
   { id: "u1", name: "Nguyễn Thị Mai", phone: "0987111222", tag: "VIP", totalOrders: 5, totalSpent: 14500000, lastVisit: "2026-06-10", notes: "Khách quen, thích chụp buổi sáng" },
@@ -76,6 +77,8 @@ export function mergeRemoteCustomers(remote: Customer[]): boolean {
   for (const c of remote) {
     const local = byId.get(c.id);
     if (!local) {
+      // Chế độ THẬT (ẩn mẫu): KHÔNG nạp lại khách mẫu mà /api/chat-sync kéo về.
+      if (isSampleHidden() && SAMPLE_IDS.customers.has(c.id)) continue;
       customers.push(c);
       byId.set(c.id, c);
       changed = true;

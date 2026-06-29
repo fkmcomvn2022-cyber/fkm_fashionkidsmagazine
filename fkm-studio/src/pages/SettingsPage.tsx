@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, MessageCircle, Bot, Wallet, Bell, BellRing, Smartphone, ChevronRight, LogOut, Clock, CalendarClock, Wand2, Workflow, Globe, Copy, Check, HardDrive } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bot, Wallet, Bell, BellRing, Smartphone, ChevronRight, LogOut, Clock, CalendarClock, Wand2, Workflow, Globe, Copy, Check, HardDrive, FlaskConical } from "lucide-react";
 import { Panel } from "@/components/ui/Card";
 import { breakWindowSettings, setBreakWindowSettings, type BreakWindowSetting } from "@/lib/scheduling";
 import { vietQRSettings, setVietQRSettings, isVietQRConfigured, type VietQRSettings } from "@/lib/payments";
@@ -76,7 +76,7 @@ export default function SettingsPage() {
   const [qr, setQr] = useState<VietQRSettings>(vietQRSettings);
   const [reminders, setReminders] = useState<ReminderSettings>(reminderSettings);
   const [backendUrlCopied, setBackendUrlCopied] = useState(false);
-  const { bumpDataVersion } = useAppState();
+  const { bumpDataVersion, isDemo, toggleDemo } = useAppState();
 
   const handleCopyBackendUrl = () => {
     navigator.clipboard?.writeText(BACKEND_URL).catch(() => {});
@@ -162,6 +162,15 @@ export default function SettingsPage() {
         </button>
         <h2 className="text-[16px] font-bold text-ink">Thiết lập</h2>
       </div>
+
+      <Panel title="Chế độ Demo" subtitle="BẬT để hiện dữ liệu mẫu (xem thử/giới thiệu); TẮT để chỉ làm việc với dữ liệu thật. Mặc định là TẮT — dùng thật hằng ngày.">
+        <Row
+          icon={<FlaskConical size={16} />}
+          label="Hiện dữ liệu mẫu (demo)"
+          desc={isDemo ? "Đang BẬT — đang hiện cả dữ liệu mẫu" : "Đang TẮT — chỉ hiện dữ liệu thật"}
+          right={<Toggle checked={isDemo} onChange={toggleDemo} />}
+        />
+      </Panel>
 
       <Panel title="Kết nối">
         <div className="flex flex-col divide-y divide-border-soft">

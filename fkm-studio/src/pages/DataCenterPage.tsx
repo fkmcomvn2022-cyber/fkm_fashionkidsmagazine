@@ -18,6 +18,7 @@ import {
   hasPersistedData,
   persistAll,
   resetToSampleData,
+  wipeAllData,
   clearSampleData,
   countSampleData,
   downloadBackupFile,
@@ -43,6 +44,7 @@ export default function DataCenterPage() {
   const navigate = useNavigate();
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [confirmingClearSample, setConfirmingClearSample] = useState(false);
+  const [confirmingWipe, setConfirmingWipe] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
   const [backupNotice, setBackupNotice] = useState(false);
   const [driveConfig, setDriveConfig] = useState<MaskedDriveConfig | "loading" | "error">("loading");
@@ -116,6 +118,14 @@ export default function DataCenterPage() {
     clearSampleData();
   };
 
+  const handleWipe = () => {
+    if (!confirmingWipe) {
+      setConfirmingWipe(true);
+      return;
+    }
+    wipeAllData();
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2.5">
@@ -165,6 +175,23 @@ export default function DataCenterPage() {
             Sẽ xoá toàn bộ dữ liệu đã lưu trên thiết bị này và tải lại trang. Không thể hoàn tác.
           </p>
         )}
+
+        <div className="mt-3 pt-3 border-t border-border-soft">
+          <Button
+            variant={confirmingWipe ? "danger" : "ghost"}
+            size="sm"
+            icon={<Trash2 size={13} />}
+            className="w-full"
+            onClick={handleWipe}
+          >
+            {confirmingWipe ? "Bấm lại để XOÁ TRẮNG toàn bộ" : "Xoá TRẮNG toàn bộ (làm lại từ đầu)"}
+          </Button>
+          <p className="text-[11px] text-danger mt-2">
+            {confirmingWipe
+              ? "Xoá SẠCH mọi đơn/khách/concept/nhân sự/kho/tin nhắn (cả mẫu lẫn thật) trên thiết bị NÀY và trên server, để app về trắng hoàn toàn cho anh tự nhập lại. Cấu hình (giờ nghỉ, VietQR, AI...) được giữ. KHÔNG THỂ HOÀN TÁC — nên Tải file backup trước."
+              : "Khác với 2 nút trên: đưa app về RỖNG hoàn toàn (không nạp lại mẫu, không giữ khách thật), xoá cả trên server để không tự đồng bộ về."}
+          </p>
+        </div>
       </Panel>
 
       {sampleBreakdown.length > 0 && (

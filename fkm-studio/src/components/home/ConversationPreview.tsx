@@ -5,6 +5,7 @@ import { Panel } from "@/components/ui/Card";
 import { Avatar } from "@/components/ui/Avatar";
 import { getConversationThreads, customerById } from "@/data";
 import { timeAgoVi } from "@/lib/format";
+import { customerAvatarSrc } from "@/lib/avatar";
 import { useAppState } from "@/lib/appState";
 
 export function ConversationPreview() {
@@ -35,7 +36,7 @@ export function ConversationPreview() {
               className="flex items-center gap-3 rounded-2xl p-2 text-left tap-scale hover:bg-surface-soft"
             >
               <div className="relative">
-                <Avatar name={customer.name} src={customer.avatar} size={38} />
+                <Avatar name={customer.name} src={customerAvatarSrc(customer)} size={38} />
                 <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#1877F2] flex items-center justify-center border-2 border-surface">
                   <MessageCircle size={9} className="text-white" />
                 </span>

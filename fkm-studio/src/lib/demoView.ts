@@ -19,7 +19,7 @@ import { concepts } from "@/data/concepts";
 import { staff } from "@/data/staff";
 import { inventory, addonServices, expenses } from "@/data/inventory";
 import { messages } from "@/data/messages";
-import { SAMPLE_IDS } from "@/lib/sampleIds";
+import { SAMPLE_IDS, setSampleHidden } from "@/lib/sampleIds";
 import type {
   Order,
   Customer,
@@ -31,7 +31,11 @@ import type {
   Message,
 } from "@/types";
 
-const HIDE_KEY = "fkm-studio-hide-sample-v1";
+// Cờ "Chế độ Demo" (bật trong Cài đặt). MẶC ĐỊNH TẮT = dữ liệu thật (đúng thực
+// tế dùng hằng ngày, không thấy dữ liệu mẫu). Bật = hiện dữ liệu mẫu để
+// xem/giới thiệu. Trước đây là nút THẬT/DEMO ở header (dễ lẫn) — đã chuyển vào
+// Cài đặt và đảo mặc định thành thật.
+const DEMO_KEY = "fkm-studio-demo-mode";
 
 export interface SampleStash {
   orders: Order[];
@@ -50,17 +54,18 @@ export function isSampleHidden(): boolean {
   return stash !== null;
 }
 
-export function getHideSamplePref(): boolean {
+/** Chế độ Demo đang bật hay không (mặc định false = dữ liệu thật). */
+export function getDemoMode(): boolean {
   try {
-    return localStorage.getItem(HIDE_KEY) === "1";
+    return localStorage.getItem(DEMO_KEY) === "1";
   } catch {
     return false;
   }
 }
 
-function setHideSamplePref(hide: boolean): void {
+function setDemoModePref(on: boolean): void {
   try {
-    localStorage.setItem(HIDE_KEY, hide ? "1" : "0");
+    localStorage.setItem(DEMO_KEY, on ? "1" : "0");
   } catch {
     // bỏ qua — không chặn luồng chính
   }
@@ -88,13 +93,15 @@ export function hideSampleData(): void {
     expenses: spliceSamples(expenses, SAMPLE_IDS.expenses),
     messages: spliceSamples(messages, SAMPLE_IDS.messages),
   };
-  setHideSamplePref(true);
+  setDemoModePref(false); // ẩn mẫu = Chế độ Demo TẮT (dữ liệu thật)
+  setSampleHidden(true); // để merge từ /api/chat-sync cũng bỏ qua bản ghi mẫu
 }
 
 /** Hiện lại dữ liệu mẫu (chế độ DEMO). Idempotent. */
 export function showSampleData(): void {
   if (!stash) {
-    setHideSamplePref(false);
+    setDemoModePref(true);
+    setSampleHidden(false);
     return;
   }
   orders.push(...stash.orders);
@@ -106,13 +113,14 @@ export function showSampleData(): void {
   expenses.push(...stash.expenses);
   messages.push(...stash.messages);
   stash = null;
-  setHideSamplePref(false);
+  setDemoModePref(true); // hiện mẫu = Chế độ Demo BẬT
+  setSampleHidden(false);
 }
 
 /** Áp dụng đúng trạng thái đã lưu lúc khởi động (gọi sau loadPersisted). */
 export function applySampleVisibilityFromPref(): void {
-  if (getHideSamplePref()) hideSampleData();
-  else showSampleData();
+  if (getDemoMode()) showSampleData();
+  else hideSampleData(); // mặc định (chưa từng bật demo) = dữ liệu thật
 }
 
 /** Lấy các bản ghi mẫu đang bị ẩn để persistAll() gộp lại khi lưu — tránh lưu
@@ -126,5 +134,6 @@ export function getHiddenSampleStash(): SampleStash | null {
  * seed lại từ đầu nên không cần khôi phục stash. */
 export function dropHiddenSampleStash(): void {
   stash = null;
-  setHideSamplePref(false);
+  setDemoModePref(false);
+  setSampleHidden(false);
 }

@@ -1,5 +1,6 @@
 import type { Message, ConversationThread, WeatherDay } from "@/types";
 import { nextNumericId } from "@/lib/nextId";
+import { SAMPLE_IDS, isSampleHidden } from "@/lib/sampleIds";
 
 /**
  * Phase 2 (xem [[fkm-studio-ai-chatbot-roadmap]]): mảng này giờ là dữ liệu
@@ -83,6 +84,9 @@ export function mergeRemoteMessages(remote: Message[]): boolean {
   let added = false;
   for (const m of remote) {
     if (existingIds.has(m.id)) continue;
+    // Chế độ THẬT (ẩn mẫu): KHÔNG nạp lại tin mẫu mà /api/chat-sync kéo về từ
+    // server (server vẫn giữ bản mirror có mẫu) — nếu không THẬT vẫn hiện tin test.
+    if (isSampleHidden() && SAMPLE_IDS.messages.has(m.id)) continue;
     messages.push(m);
     existingIds.add(m.id);
     added = true;

@@ -354,6 +354,30 @@ export function hasPersistedData(): boolean {
 }
 
 /**
+ * XOÁ TRẮNG TOÀN BỘ dữ liệu nghiệp vụ — KHÁC resetToSampleData (nạp lại mẫu)
+ * và clearSampleData (chỉ bỏ mẫu, giữ thật). Hàm này làm app về trạng thái
+ * RỖNG hoàn toàn để studio tự nhập từ đầu:
+ *  - Đổ rỗng mọi mảng dữ liệu sống (đơn, khách, concept, nhân sự, kho, dịch vụ,
+ *    chi phí, tin nhắn, quyết toán) — kể cả dữ liệu mẫu seed lẫn dữ liệu thật.
+ *  - Bỏ luôn stash mẫu đang ẩn (nếu đang ở chế độ THẬT) để không bị gộp lại.
+ *  - persistAll() ghi snapshot RỖNG vào localStorage VÀ mirror lên server
+ *    (PUT /api/state) — nhờ vậy server cũng rỗng, không tự đồng bộ dữ liệu cũ
+ *    về lại ở lần mở sau (nếu không, /api/chat-sync sẽ kéo lại khách/tin cũ).
+ *  - GIỮ NGUYÊN phần cấu hình (giờ nghỉ, VietQR, nhắc lịch, cấu hình AI...) —
+ *    đây là thiết lập, không phải dữ liệu nghiệp vụ; muốn đổi thì sửa ở Cài đặt.
+ * Tải lại trang sau khi xoá. KHÔNG THỂ HOÀN TÁC — luôn xác nhận + khuyên backup
+ * trước khi gọi.
+ */
+export function wipeAllData(): void {
+  dropHiddenSampleStash(); // bỏ stash mẫu đang ẩn để buildSnapshot không gộp lại
+  for (const arr of [orders, customers, concepts, staff, inventory, addonServices, expenses, messages, crewSettlements]) {
+    arr.length = 0;
+  }
+  persistAll(); // ghi rỗng vào localStorage + mirror rỗng lên server
+  window.location.reload();
+}
+
+/**
  * Xoá dữ liệu đã lưu và tải lại trang — app khởi động lại từ đầu với dữ liệu
  * mẫu gốc. Dùng cho nút "Xoá dữ liệu / dùng lại dữ liệu mẫu" ở Trung tâm Dữ
  * liệu — luôn phải xác nhận với người dùng trước khi gọi hàm này vì không

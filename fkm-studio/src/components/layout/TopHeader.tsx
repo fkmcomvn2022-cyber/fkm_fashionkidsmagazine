@@ -1,6 +1,5 @@
 import { RefreshCw, Cloud, CloudRain, Sun, CloudLightning, LayoutGrid } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import clsx from "clsx";
 import { useAppState } from "@/lib/appState";
 import { weatherForecast, orders, conceptById } from "@/data";
 import { formatDateShort } from "@/lib/format";
@@ -24,7 +23,7 @@ function nextShootWeather() {
 }
 
 export function TopHeader() {
-  const { isDemo, toggleDemo, refreshing, triggerRefresh } = useAppState();
+  const { isDemo, refreshing, triggerRefresh } = useAppState();
   const navigate = useNavigate();
   const next = nextShootWeather();
   const Icon = next ? weatherIcon[next.weather.icon] : Cloud;
@@ -40,15 +39,13 @@ export function TopHeader() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={toggleDemo}
-              className={clsx(
-                "text-[11px] font-semibold rounded-full px-2.5 py-1 tap-scale transition-colors",
-                isDemo ? "bg-warning-soft text-warning" : "bg-success-soft text-success",
-              )}
-            >
-              {isDemo ? "DEMO" : "THẬT"}
-            </button>
+            {/* Nút DEMO/THẬT đã chuyển vào Cài đặt > Chế độ Demo (gây lẫn khi ở
+                header). Chỉ hiện 1 nhãn nhỏ khi đang BẬT Demo để khỏi quên. */}
+            {isDemo && (
+              <span className="text-[11px] font-semibold rounded-full px-2.5 py-1 bg-warning-soft text-warning">
+                DEMO
+              </span>
+            )}
             <button
               onClick={triggerRefresh}
               className="w-8 h-8 rounded-full flex items-center justify-center bg-surface-soft text-ink-soft tap-scale"

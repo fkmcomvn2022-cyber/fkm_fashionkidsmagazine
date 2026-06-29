@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { ChevronLeft, MessageCircle, Send, Copy, Check, Loader2, AlertCircle, Trash2, ImagePlus } from "lucide-react";
+import { ChevronLeft, MessageCircle, Send, Copy, Check, Loader2, AlertCircle, Trash2, ImagePlus, Bot, Power } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import {
   getConversationThreads,
@@ -18,6 +18,7 @@ import { describeOpenWindows, getSuggestedHours, formatHourSuggestionsReply } fr
 import { useAppState } from "@/lib/appState";
 import { BACKEND_URL } from "@/lib/persistence";
 import { uploadImage, uploadImageErrorMessage } from "@/lib/uploadImage";
+import { customerAvatarSrc } from "@/lib/avatar";
 import type { Message } from "@/types";
 
 const templates = [
@@ -62,6 +63,28 @@ function buildTemplate(
 // "real-time" khi đang mở màn Chat, không quá dày để tốn pin/băng thông.
 const POLL_INTERVAL_MS = 5000;
 
+// Nếu aiPausedUntil còn xa hơn mốc này (~100 năm) thì coi là "tạm dừng vĩnh
+// viễn" (server đặt PERMANENT_PAUSE_UNTIL = năm ~275760), hiển thị khác với
+// tạm dừng có hạn giờ.
+const PERMANENT_THRESHOLD_MS = 1000 * 60 * 60 * 24 * 365 * 100;
+
+/** Số phút từ bây giờ tới cuối ngày hôm nay (23:59) — cho lựa chọn "Hết hôm nay". */
+function minutesUntilEndOfDay(): number {
+  const now = new Date();
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  return Math.max(1, Math.ceil((end.getTime() - now.getTime()) / 60_000));
+}
+
+/** Mô tả thời gian còn lại dạng "X phút" / "X giờ Y phút". */
+function remainingLabel(ms: number): string {
+  const totalMin = Math.max(1, Math.ceil(ms / 60_000));
+  if (totalMin < 60) return `${totalMin} phút`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m ? `${h} giờ ${m} phút` : `${h} giờ`;
+}
+
 export default function ChatPage() {
   const location = useLocation();
   const initial = (location.state as { customerId?: string } | null)?.customerId ?? null;
@@ -71,6 +94,7 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pauseActionBusy, setPauseActionBusy] = useState(false);
+  const [showPauseMenu, setShowPauseMenu] = useState(false);
   const [confirmingDeleteConvo, setConfirmingDeleteConvo] = useState(false);
   const [deletingConvo, setDeletingConvo] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -258,14 +282,17 @@ export default function ChatPage() {
   // hội thoại đang mở, không cần đợi gửi tin mới. Mutate-in-place rồi
   // bumpDataVersion(), giống cách app này luôn ghi dữ liệu cục bộ (xem
   // [[fkm-studio-data-write-path]]) — server là nguồn xác nhận qua response.
-  const setAiPause = async (minutes: number) => {
+  // Bật/tắt bot cho RIÊNG khách đang mở. payload: { minutes } (0 = bật lại
+  // ngay, >0 = tạm dừng N phút) hoặc { permanent: true } = tắt vĩnh viễn tới
+  // khi bật lại tay. Mutate-in-place rồi bumpDataVersion (xem [[fkm-studio-data-write-path]]).
+  const setBotPause = async (payload: { minutes?: number; permanent?: boolean }) => {
     if (!customer || pauseActionBusy) return;
     setPauseActionBusy(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/customers/${customer.id}/ai-pause`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ minutes }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const json = (await res.json()) as { ok: boolean; aiPausedUntil: number | null };
@@ -323,7 +350,7 @@ export default function ChatPage() {
                 className="flex items-center gap-3 rounded-3xl bg-surface border border-border-soft shadow-soft p-3 text-left tap-scale"
               >
                 <div className="relative">
-                  <Avatar name={c.name} src={c.avatar} size={44} />
+                  <Avatar name={c.name} src={customerAvatarSrc(c)} size={44} />
                   <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#1877F2] flex items-center justify-center border-2 border-surface">
                     <MessageCircle size={9} className="text-white" />
                   </span>
@@ -357,7 +384,7 @@ export default function ChatPage() {
         <button onClick={() => setSelected(null)} className="w-8 h-8 rounded-full bg-surface border border-border-soft flex items-center justify-center tap-scale">
           <ChevronLeft size={16} />
         </button>
-        <Avatar name={customer?.name ?? "?"} src={customer?.avatar} size={36} />
+        <Avatar name={customer?.name ?? "?"} src={customer ? customerAvatarSrc(customer) : undefined} size={36} />
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-semibold text-ink">{customer?.name}</p>
           <p className="text-[11px] text-muted">qua Facebook Messenger</p>
@@ -385,39 +412,84 @@ export default function ChatPage() {
         </p>
       )}
 
-      {customer?.aiPausedUntil && customer.aiPausedUntil > now ? (
-        <div className="flex items-center justify-between gap-2 rounded-xl bg-warning-soft px-3 py-2 mb-2 shrink-0">
-          <p className="text-[11px] text-warning font-medium">
-            AI đang tạm dừng trả lời khách này — còn ~{Math.max(1, Math.ceil((customer.aiPausedUntil - now) / 60000))} phút
-          </p>
-          <div className="flex gap-1.5 shrink-0">
-            <button
-              onClick={() => setAiPause(Math.max(1, Math.ceil((customer.aiPausedUntil! - now) / 60000)) + 30)}
-              disabled={pauseActionBusy}
-              className="text-[10px] font-semibold rounded-full bg-surface px-2.5 py-1 tap-scale disabled:opacity-50"
-            >
-              +30 phút
-            </button>
-            <button
-              onClick={() => setAiPause(0)}
-              disabled={pauseActionBusy}
-              className="text-[10px] font-semibold rounded-full bg-brand-blue text-white px-2.5 py-1 tap-scale disabled:opacity-50"
-            >
-              Bật lại AI ngay
-            </button>
+      {customer && (() => {
+        const until = customer.aiPausedUntil;
+        const paused = typeof until === "number" && until > now;
+        const permanent = paused && until - now > PERMANENT_THRESHOLD_MS;
+        return (
+          <div className="mb-2 shrink-0">
+            <div className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 ${paused ? "bg-warning-soft" : "bg-success-soft"}`}>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Bot size={14} className={paused ? "text-warning shrink-0" : "text-success shrink-0"} />
+                <p className={`text-[11px] font-medium truncate ${paused ? "text-warning" : "text-success"}`}>
+                  {paused
+                    ? permanent
+                      ? "Bot đang TẮT cho khách này (vĩnh viễn)"
+                      : `Bot tạm dừng — còn ${remainingLabel(until - now)}`
+                    : "Bot đang BẬT — tự trả lời khách này"}
+                </p>
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                {paused ? (
+                  <>
+                    {!permanent && (
+                      <button
+                        onClick={() => setBotPause({ minutes: Math.ceil((until - now) / 60000) + 30 })}
+                        disabled={pauseActionBusy}
+                        className="text-[10px] font-semibold rounded-full bg-surface px-2.5 py-1 tap-scale disabled:opacity-50"
+                      >
+                        +30 phút
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setBotPause({ minutes: 0 }); setShowPauseMenu(false); }}
+                      disabled={pauseActionBusy}
+                      className="text-[10px] font-semibold rounded-full bg-brand-blue text-white px-2.5 py-1 tap-scale disabled:opacity-50 flex items-center gap-1"
+                    >
+                      <Power size={11} /> Bật lại
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setShowPauseMenu((v) => !v)}
+                    disabled={pauseActionBusy}
+                    className="text-[10px] font-semibold rounded-full bg-surface px-2.5 py-1 tap-scale disabled:opacity-50"
+                  >
+                    Tắt bot ▾
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {showPauseMenu && !paused && (
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {[
+                  { label: "30 phút", minutes: 30 },
+                  { label: "1 giờ", minutes: 60 },
+                  { label: "3 giờ", minutes: 180 },
+                  { label: "Hết hôm nay", minutes: minutesUntilEndOfDay() },
+                ].map((opt) => (
+                  <button
+                    key={opt.label}
+                    onClick={() => { setBotPause({ minutes: opt.minutes }); setShowPauseMenu(false); }}
+                    disabled={pauseActionBusy}
+                    className="text-[10px] font-medium rounded-full bg-surface-soft text-ink-soft px-2.5 py-1 tap-scale disabled:opacity-50"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => { setBotPause({ permanent: true }); setShowPauseMenu(false); }}
+                  disabled={pauseActionBusy}
+                  className="text-[10px] font-semibold rounded-full bg-danger-soft text-danger px-2.5 py-1 tap-scale disabled:opacity-50"
+                >
+                  Vĩnh viễn
+                </button>
+              </div>
+            )}
           </div>
-        </div>
-      ) : (
-        customer && (
-          <button
-            onClick={() => setAiPause(30)}
-            disabled={pauseActionBusy}
-            className="text-[10px] font-medium text-muted underline mb-2 shrink-0 self-start disabled:opacity-50"
-          >
-            Tạm dừng AI 30 phút cho khách này
-          </button>
-        )
-      )}
+        );
+      })()}
 
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pb-3">
         {thread.map((m) => (

@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import { concepts } from "@/data";
 import { persistAll } from "@/lib/persistence";
-import { getHideSamplePref, hideSampleData, showSampleData } from "@/lib/demoView";
+import { getDemoMode, hideSampleData, showSampleData } from "@/lib/demoView";
 
 interface AppStateValue {
   isDemo: boolean;
@@ -26,9 +26,9 @@ interface AppStateValue {
 const AppStateContext = createContext<AppStateValue | null>(null);
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  // isDemo = true (DEMO): hiện cả dữ liệu mẫu; false (THẬT): ẩn dữ liệu mẫu.
-  // Khởi tạo theo lựa chọn đã lưu (demoView) để giữ đúng chế độ sau khi tải lại.
-  const [isDemo, setIsDemo] = useState(() => !getHideSamplePref());
+  // isDemo = true: Chế độ Demo BẬT (hiện dữ liệu mẫu); false: dữ liệu thật.
+  // Mặc định false (thật) — bật/tắt trong Cài đặt > Chế độ Demo.
+  const [isDemo, setIsDemo] = useState(() => getDemoMode());
   const [activeConceptId, setActiveConceptId] = useState(concepts[0]?.id ?? "");
   const [refreshing, setRefreshing] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);

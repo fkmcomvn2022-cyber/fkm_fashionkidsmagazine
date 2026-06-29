@@ -3,6 +3,7 @@ import { Sheet } from "@/components/ui/Sheet";
 import { Avatar } from "@/components/ui/Avatar";
 import { StatusPill } from "@/components/ui/Badge";
 import { formatVND, formatDateShort } from "@/lib/format";
+import { customerAvatarSrc } from "@/lib/avatar";
 import { ordersByCustomer, conceptById } from "@/data";
 import type { Customer } from "@/types";
 
@@ -14,7 +15,7 @@ export function CustomerDetailSheet({ customer, onClose }: { customer: Customer 
     <Sheet open={!!customer} onClose={onClose} title="Hồ sơ khách hàng">
       <div className="flex gap-4">
         <div className="flex flex-col items-center gap-2 shrink-0">
-          <Avatar name={customer.name} src={customer.avatar} size={72} />
+          <Avatar name={customer.name} src={customerAvatarSrc(customer)} size={72} />
           {customer.tag && (
             <span className="text-[10px] font-semibold bg-brand-blue-soft text-brand-blue rounded-full px-2.5 py-1">{customer.tag}</span>
           )}

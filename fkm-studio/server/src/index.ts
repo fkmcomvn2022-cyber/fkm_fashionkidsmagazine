@@ -787,9 +787,17 @@ app.post("/api/messages/clear", async (req, res) => {
 // Giai đoạn 7.2 — ChatPage cho phép xem/chỉnh trực tiếp thời gian tạm dừng AI
 // của 1 hội thoại (không cần gửi tin mới): { minutes } > 0 = dừng thêm/dừng
 // lại từ bây giờ trong N phút; { minutes: 0 } = bật lại AI ngay (xoá pause).
+// Mốc "tạm dừng VĨNH VIỄN" = timestamp cực xa (năm ~275760, giới hạn Date của
+// JS). Vì luôn > Date.now() nên nhánh chặn AI tự trả lời (aiPausedUntil > now)
+// coi như tắt mãi, và logic "tự bật lại khi hết hạn" không bao giờ kích hoạt —
+// đúng nghĩa tắt vĩnh viễn cho tới khi studio bật lại tay. Client nhận diện
+// "vĩnh viễn" khi (aiPausedUntil - now) lớn hơn ~100 năm (xem ChatPage).
+const PERMANENT_PAUSE_UNTIL = 8_640_000_000_000_000;
+
 app.post("/api/customers/:id/ai-pause", async (req, res) => {
-  const { minutes } = req.body ?? {};
-  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0) {
+  const { minutes, permanent } = req.body ?? {};
+  const isPermanent = permanent === true;
+  if (!isPermanent && (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 0)) {
     res.status(400).json({ ok: false, error: "invalid_body" });
     return;
   }
@@ -802,7 +810,9 @@ app.post("/api/customers/:id/ai-pause", async (req, res) => {
     res.status(404).json({ ok: false, error: "not_found" });
     return;
   }
-  if (minutes === 0) {
+  if (isPermanent) {
+    customer.aiPausedUntil = PERMANENT_PAUSE_UNTIL;
+  } else if (minutes === 0) {
     delete customer.aiPausedUntil;
   } else {
     customer.aiPausedUntil = Date.now() + minutes * 60_000;
@@ -824,6 +834,48 @@ app.get("/api/chat-sync", async (_req, res) => {
     messages: (state?.messages as unknown[]) ?? [],
     customers: (state?.customers as unknown[]) ?? [],
   });
+});
+
+// PROXY ảnh đại diện khách Facebook (xem src/lib/avatar.ts). App cá nhân không
+// qua App Review nên frontend KHÔNG lấy/hiện được ảnh từ link CDN Facebook
+// trực tiếp. Server đứng ra gọi Graph API `/{psid}/picture` kèm Page Access
+// Token (tầng server được phép), kiểm tra có ảnh thật không (redirect=false ->
+// is_silhouette), rồi tải ảnh và stream "sạch" về cho <img>. Không có ảnh thật
+// -> trả 404 để Avatar tự rơi về chữ cái đầu. Có cache để đỡ gọi lại nhiều lần.
+app.get("/api/avatar/:psid", async (req, res) => {
+  const psid = req.params.psid;
+  const { pageAccessToken } = await getEffectiveFbConfig();
+  if (!pageAccessToken || !psid) {
+    res.status(404).end();
+    return;
+  }
+  try {
+    const metaRes = await fetch(
+      `https://graph.facebook.com/v20.0/${encodeURIComponent(psid)}/picture?type=normal&redirect=false&access_token=${encodeURIComponent(pageAccessToken)}`,
+    );
+    if (!metaRes.ok) {
+      res.status(404).end();
+      return;
+    }
+    const meta = (await metaRes.json()) as { data?: { url?: string; is_silhouette?: boolean } };
+    const url = meta.data?.url;
+    if (!url || meta.data?.is_silhouette) {
+      res.status(404).end(); // không có ảnh thật -> Avatar tự hiện chữ cái đầu
+      return;
+    }
+    const imgRes = await fetch(url);
+    if (!imgRes.ok) {
+      res.status(404).end();
+      return;
+    }
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    res.setHeader("Content-Type", imgRes.headers.get("content-type") ?? "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400"); // cache 1 ngày, đỡ gọi Graph API liên tục
+    res.end(buf);
+  } catch (err) {
+    console.warn("[facebook] Lỗi proxy avatar (PSID", psid, "):", err);
+    res.status(404).end();
+  }
 });
 
 await initPush();
