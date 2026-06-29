@@ -337,7 +337,7 @@ app.post("/api/ai/test-reply", async (req, res) => {
       res.json({ ok: false, error: "no_reply" });
       return;
     }
-    res.json({ ok: true, reply, chunks: splitReplyIntoMessages(reply) });
+    res.json({ ok: true, reply: reply.text, chunks: splitReplyIntoMessages(reply.text), provider: reply.provider, model: reply.model, functions: reply.functions });
   } catch (err) {
     console.error("[ai-test] Lỗi khi test AI trả lời khách:", err);
     res.status(500).json({ ok: false, error: "internal_error" });
@@ -459,6 +459,7 @@ async function sendAiReplyChunks(
   customer: { id?: string; facebookId?: string },
   reply: string,
   token: string,
+  aiMeta?: { provider?: string; model?: string; functions?: string[] },
 ): Promise<boolean> {
   if (!customer.facebookId) return false;
   const chunks = splitReplyIntoMessages(reply);
@@ -467,7 +468,9 @@ async function sendAiReplyChunks(
     if (i > 0) await new Promise((r) => setTimeout(r, 900));
     const sent = await sendFacebookMessage(customer.facebookId, chunks[i], token);
     if (sent.ok) {
-      appendMessage(state, { customerId: customer.id ?? "", channel: "facebook", fromCustomer: false, text: chunks[i], aiGenerated: true });
+      // Gắn aiMeta vào ĐOẠN ĐẦU thôi (các đoạn sau là phần băm nhỏ của cùng 1
+      // câu trả lời) — đỡ lặp nhãn mờ dưới mỗi bong bóng.
+      appendMessage(state, { customerId: customer.id ?? "", channel: "facebook", fromCustomer: false, text: chunks[i], aiGenerated: true, aiMeta: i === 0 ? aiMeta : undefined });
       sentAny = true;
     } else {
       console.error("[ai] Gửi 1 đoạn tin AI thất bại:", sent.error);
@@ -686,7 +689,11 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
           historySummary,
         });
         if (reply) {
-          const sentAny = await sendAiReplyChunks(state, customer, reply, FB_PAGE_ACCESS_TOKEN);
+          const sentAny = await sendAiReplyChunks(state, customer, reply.text, FB_PAGE_ACCESS_TOKEN, {
+            provider: reply.provider,
+            model: reply.model,
+            functions: reply.functions,
+          });
           if (sentAny) {
             await sendPushToAll({
               title: "FKM Studio",

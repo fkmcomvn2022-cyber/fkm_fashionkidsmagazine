@@ -328,6 +328,9 @@ export interface Message {
   // công khai (xem server/src/googleDrive.ts). `text` vẫn có thể có (chú
   // thích kèm ảnh) hoặc rỗng nếu chỉ gửi ảnh.
   imageUrl?: string;
+  // Thông tin AI đã tạo tin này (nhà cung cấp/model thật sự trả lời + function
+  // đã gọi) — chỉ để chủ studio xem mờ trong hội thoại, KHÔNG gửi cho khách.
+  aiMeta?: { provider?: string; model?: string; functions?: string[] };
 }
 
 export interface ConversationThread {

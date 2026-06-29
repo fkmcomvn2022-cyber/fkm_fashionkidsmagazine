@@ -52,6 +52,10 @@ interface MessageShape {
   aiGenerated?: boolean;
   // Tin kèm ảnh (nút "Gửi ảnh" ở ChatPage) — mirror imageUrl ở frontend.
   imageUrl?: string;
+  // Thông tin AI đã tạo tin này (nhà cung cấp/model thật sự trả lời sau
+  // retry/fallback + các function đã gọi) — chỉ để chủ studio xem mờ trong hội
+  // thoại, KHÔNG gửi cho khách. Mirror aiMeta ở src/types/index.ts (frontend).
+  aiMeta?: { provider?: string; model?: string; functions?: string[] };
 }
 
 function customersOf(state: StateSnapshot): CustomerShape[] {
@@ -153,18 +157,21 @@ async function resolveCustomerProfile(
   psid: string,
   pageAccessToken: string,
   payloadHint?: { name?: string; avatar?: string },
-): Promise<{ name?: string; avatar?: string }> {
+): Promise<{ name?: string }> {
+  // CHỈ resolve TÊN. Avatar KHÔNG lưu vào customer.avatar nữa — ảnh khách
+  // Facebook hiển thị qua PROXY `/api/avatar/:psid` (xem src/lib/avatar.ts),
+  // còn customer.avatar để DÀNH riêng cho ảnh chủ studio tự đặt tay (sửa hồ sơ
+  // khách). Nhờ vậy ảnh tự đặt luôn được ưu tiên, không bị link CDN Facebook
+  // (hay bị chặn) ghi đè.
   let name = payloadHint?.name?.trim() || undefined;
-  let avatar = payloadHint?.avatar || undefined;
   if (!name) {
     name = (await fetchNameFromConversations(psid, pageAccessToken)) || undefined;
   }
-  if (!name || !avatar) {
+  if (!name) {
     const profile = await fetchFacebookProfile(psid, pageAccessToken);
-    if (!name && profile?.name) name = profile.name;
-    if (!avatar && profile?.avatar) avatar = profile.avatar;
+    if (profile?.name) name = profile.name;
   }
-  return { name, avatar };
+  return { name };
 }
 
 /**
@@ -196,10 +203,11 @@ export async function findOrCreateCustomerByFacebookId(
     // chối lấy hồ sơ) — thử lấy lại mỗi khi khách nhắn tin tiếp, để tự "vá"
     // dần, không bị kẹt vĩnh viễn với "Khách Facebook" như khách tạo trước
     // bản fix này. Ưu tiên payloadHint (free, không qua Graph) trước.
-    if (!existing.avatar || existing.name === "Khách Facebook") {
+    // Chỉ thử lấy lại TÊN khi còn là tên mặc định (avatar không còn lưu tự động
+    // nữa — hiển thị qua proxy, hoặc do chủ studio tự đặt; xem resolveCustomerProfile).
+    if (!existing.name || existing.name === "Khách Facebook") {
       const profile = await resolveCustomerProfile(psid, pageAccessToken, payloadHint);
       if (profile.name) existing.name = profile.name;
-      if (profile.avatar) existing.avatar = profile.avatar;
     }
     return existing;
   }
@@ -225,7 +233,8 @@ export async function findOrCreateCustomerByFacebookId(
     id: `fbu_${psid}`,
     name: profile?.name || "Khách Facebook",
     phone: "",
-    avatar: profile?.avatar,
+    // avatar để trống — ảnh khách Facebook hiển thị qua proxy /api/avatar/:psid;
+    // field này chỉ dùng khi chủ studio tự đặt ảnh (sửa hồ sơ khách).
     facebookId: psid,
     tag: "Mới",
     totalOrders: 0,
@@ -237,7 +246,15 @@ export async function findOrCreateCustomerByFacebookId(
 
 export function appendMessage(
   state: StateSnapshot,
-  input: { customerId: string; channel: string; fromCustomer: boolean; text: string; aiGenerated?: boolean; imageUrl?: string },
+  input: {
+    customerId: string;
+    channel: string;
+    fromCustomer: boolean;
+    text: string;
+    aiGenerated?: boolean;
+    imageUrl?: string;
+    aiMeta?: { provider?: string; model?: string; functions?: string[] };
+  },
 ): MessageShape {
   const messages = messagesOf(state);
   const message: MessageShape = {
@@ -256,6 +273,7 @@ export function appendMessage(
     read: !input.fromCustomer, // tin studio/AI tự gửi coi như "đã đọc" ngay, tin khách gửi vào thì chưa
     ...(input.aiGenerated ? { aiGenerated: true } : {}),
     ...(input.imageUrl ? { imageUrl: input.imageUrl } : {}),
+    ...(input.aiMeta ? { aiMeta: input.aiMeta } : {}),
   };
   messages.push(message);
   return message;

@@ -621,9 +621,17 @@ async function callGemini(cfg: AiProviderConfig, body: Record<string, unknown>):
   return (await res.json()) as GeminiResponse;
 }
 
-async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, systemPrompt: string): Promise<string | null> {
+// Kết quả 1 lượt gọi AI: câu trả lời + danh sách KEY function đã gọi trong
+// lượt đó (để hiển thị mờ cho chủ studio "AI gọi function gì", xem ChatPage).
+interface TextLoopResult {
+  text: string;
+  functions: string[];
+}
+
+async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, systemPrompt: string): Promise<TextLoopResult | null> {
   const enabledFunctions = (ctx.functions ?? []).filter((f) => f.enabled && FUNCTION_SCHEMAS[f.key]);
   const tools = enabledFunctions.length ? [{ functionDeclarations: enabledFunctions.map(buildToolDeclaration) }] : undefined;
+  const calledFunctions: string[] = [];
 
   // Gemini yêu cầu role đầu tiên trong `contents` là "user" — cắt từ tin khách
   // gần nhất, bỏ các tin phía trước cùng-role-liên-tiếp ở đầu nếu lịch sử bắt
@@ -653,7 +661,7 @@ async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, sys
 
     if (functionCallParts.length === 0) {
       const text = parts.map((p) => p.text ?? "").join("").trim();
-      return text || null;
+      return text ? { text, functions: calledFunctions } : null;
     }
 
     // Ghi lại đúng lượt "model" (có functionCall) rồi nối tiếp lượt
@@ -662,6 +670,7 @@ async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, sys
     const responseParts: GeminiPart[] = [];
     for (const part of functionCallParts) {
       const name = part.functionCall!.name;
+      if (!calledFunctions.includes(name)) calledFunctions.push(name);
       const args = part.functionCall!.args ?? {};
       const result = await executeFunction(name, args, ctx.state, ctx.customer);
       responseParts.push({ functionResponse: { name, response: result } });
@@ -753,9 +762,10 @@ async function callOpenAiCompatible(
   return message;
 }
 
-async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfig, ctx: AiReplyContext, systemPrompt: string): Promise<string | null> {
+async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfig, ctx: AiReplyContext, systemPrompt: string): Promise<TextLoopResult | null> {
   const enabledFunctions = (ctx.functions ?? []).filter((f) => f.enabled && FUNCTION_SCHEMAS[f.key]);
   const tools = enabledFunctions.length ? buildOpenAiTools(enabledFunctions) : undefined;
+  const calledFunctions: string[] = [];
 
   const recent = ctx.history.slice(-(ctx.historyWindow ?? CHAT_HISTORY_WINDOW));
   const firstCustomerIdx = recent.findIndex((t) => t.fromCustomer);
@@ -772,11 +782,12 @@ async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfi
     const toolCalls = message.tool_calls ?? [];
     if (toolCalls.length === 0) {
       const text = typeof message.content === "string" ? message.content.trim() : "";
-      return text || null;
+      return text ? { text, functions: calledFunctions } : null;
     }
 
     messages.push(message);
     for (const call of toolCalls) {
+      if (!calledFunctions.includes(call.function.name)) calledFunctions.push(call.function.name);
       let args: Record<string, unknown> = {};
       try {
         args = JSON.parse(call.function.arguments || "{}");
@@ -891,17 +902,30 @@ export function splitReplyIntoMessages(text: string): string[] {
     .filter(Boolean);
 }
 
-export async function generateAiReply(ctx: AiReplyContext): Promise<string | null> {
+// Kết quả trả lời AI cho khách: câu trả lời + nhà cung cấp/model thật sự đã
+// trả lời (sau retry/fallback) + danh sách function đã gọi — để hiển thị mờ
+// cho chủ studio trong hội thoại (xem ChatPage).
+export interface AiReplyResult {
+  text: string;
+  provider: string;
+  model: string;
+  functions: string[];
+}
+
+export async function generateAiReply(ctx: AiReplyContext): Promise<AiReplyResult | null> {
   const extra = ctx.customPrompt?.trim() ? `\n\nHướng dẫn thêm từ studio:\n${ctx.customPrompt.trim()}` : "";
   const summary = ctx.historySummary?.trim()
     ? `\n\nTóm tắt hội thoại trước đó với khách này (trí nhớ dài hạn — dùng để hiểu bối cảnh, KHÔNG nhắc lại máy móc cho khách):\n${ctx.historySummary.trim()}`
     : "";
   const systemPrompt = `${systemPromptHeader()}${extra}\n\nThông tin studio:\n${ctx.studioContext}${summary}`;
 
-  return withProviderFallback("text", (cfg) => {
-    if (cfg.provider === "gemini") return runGeminiTextLoop(cfg, ctx, systemPrompt);
-    if (cfg.provider === "openai") return runOpenAiCompatibleTextLoop(OPENAI_BASE_URL, cfg, ctx, systemPrompt);
-    return runOpenAiCompatibleTextLoop(DEEPSEEK_BASE_URL, cfg, ctx, systemPrompt);
+  return withProviderFallback("text", async (cfg) => {
+    const inner =
+      cfg.provider === "gemini"
+        ? await runGeminiTextLoop(cfg, ctx, systemPrompt)
+        : await runOpenAiCompatibleTextLoop(cfg.provider === "openai" ? OPENAI_BASE_URL : DEEPSEEK_BASE_URL, cfg, ctx, systemPrompt);
+    if (!inner) return null;
+    return { text: inner.text, provider: cfg.provider, model: cfg.model, functions: inner.functions };
   });
 }
 

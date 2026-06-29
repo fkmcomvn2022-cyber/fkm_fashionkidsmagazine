@@ -85,6 +85,21 @@ function remainingLabel(ms: number): string {
   return m ? `${h} giờ ${m} phút` : `${h} giờ`;
 }
 
+// Nhãn ngắn gọn (tiếng Việt) cho dòng "AI gọi function gì" hiển thị mờ dưới
+// mỗi tin AI — chỉ để chủ studio nhìn, không gửi cho khách.
+const AI_FN_LABEL: Record<string, string> = {
+  lookup_order: "tra đơn",
+  tag_customer: "gắn nhãn khách",
+  escalate_to_staff: "báo nhân viên",
+  check_available_slots: "kiểm tra lịch trống",
+  create_order_from_chat: "tạo đơn",
+  send_concept_photos: "gửi ảnh mẫu",
+  upsell_order: "thêm dịch vụ",
+  reschedule_order: "đổi lịch",
+  cancel_order: "huỷ đơn",
+};
+const AI_PROVIDER_LABEL: Record<string, string> = { gemini: "Gemini", openai: "OpenAI", deepseek: "DeepSeek" };
+
 export default function ChatPage() {
   const location = useLocation();
   const initial = (location.state as { customerId?: string } | null)?.customerId ?? null;
@@ -493,7 +508,7 @@ export default function ChatPage() {
 
       <div className="flex-1 overflow-y-auto flex flex-col gap-2 pb-3">
         {thread.map((m) => (
-          <div key={m.id} className={`flex ${m.fromCustomer ? "justify-start" : "justify-end"}`}>
+          <div key={m.id} className={`flex flex-col ${m.fromCustomer ? "items-start" : "items-end"}`}>
             <div
               className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-[13px] ${
                 m.fromCustomer ? "bg-surface-soft text-ink rounded-bl-md" : "bg-brand-blue text-white rounded-br-md"
@@ -515,6 +530,16 @@ export default function ChatPage() {
                 {timeAgoVi(m.time)}
               </div>
             </div>
+            {/* Dòng mờ "AI nào trả lời / gọi function gì" — chỉ chủ studio thấy,
+                không phải nội dung tin gửi khách. */}
+            {m.aiGenerated && m.aiMeta && (
+              <span className="text-[9px] italic text-muted/70 mt-0.5 px-1 max-w-[80%] text-right">
+                {AI_PROVIDER_LABEL[m.aiMeta.provider ?? ""] ?? m.aiMeta.provider ?? "AI"}
+                {m.aiMeta.functions && m.aiMeta.functions.length > 0
+                  ? ` · gọi: ${m.aiMeta.functions.map((f) => AI_FN_LABEL[f] ?? f).join(", ")}`
+                  : ""}
+              </span>
+            )}
           </div>
         ))}
       </div>

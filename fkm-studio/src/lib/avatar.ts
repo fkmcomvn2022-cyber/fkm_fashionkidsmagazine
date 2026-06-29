@@ -14,6 +14,9 @@ import { BACKEND_URL } from "@/lib/persistence";
  * Khách không phải Facebook: dùng đúng `avatar` đã lưu (nếu có).
  */
 export function customerAvatarSrc(c: { facebookId?: string; avatar?: string }): string | undefined {
+  // ƯU TIÊN ảnh chủ studio tự đặt tay (sửa hồ sơ khách) — kể cả khách Facebook.
+  if (c.avatar) return c.avatar;
+  // Khách Facebook chưa có ảnh tự đặt: lấy qua proxy server.
   if (c.facebookId) return `${BACKEND_URL}/api/avatar/${encodeURIComponent(c.facebookId)}`;
-  return c.avatar;
+  return undefined;
 }
