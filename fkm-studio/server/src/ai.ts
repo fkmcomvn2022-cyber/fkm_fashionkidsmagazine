@@ -532,7 +532,12 @@ class AiProviderError extends Error {
   }
 }
 
-const RETRY_ATTEMPTS_PER_PROVIDER = 2; // 1 lần gọi + 1 lần thử lại khi lỗi tạm thời, trước khi sang nhà kế tiếp
+// Gemini (kể cả bản TRẢ PHÍ) rất hay lỗi "quá tải tạm thời" (503 UNAVAILABLE /
+// 429) trong vài giây rồi tự hồi. Theo yêu cầu anh (2026-06-29): thử lại NHIỀU
+// lần trên CÙNG 1 nhà trước, hết mới fallback sang nhà khác. 5 = 1 lần gọi đầu
+// + 4 lần thử lại (giãn dần tới ~5s, tổng ~9s) — webhook đã trả 200 cho Facebook
+// ngay từ đầu nên việc chờ này chạy ngầm, không gây trả lời trùng.
+const RETRY_ATTEMPTS_PER_PROVIDER = 5;
 
 /**
  * Thử lần lượt các nhà cung cấp AI đang bật + có key (đúng thứ tự ưu tiên
@@ -563,7 +568,9 @@ async function withProviderFallback<T>(
           err instanceof Error ? err.message : err,
         );
         if (!transient || attemptIdx === RETRY_ATTEMPTS_PER_PROVIDER - 1) break; // lỗi vĩnh viễn hoặc hết lượt thử -> sang nhà kế tiếp
-        await new Promise((r) => setTimeout(r, 400 * (attemptIdx + 1))); // backoff ngắn trước khi thử lại CÙNG nhà này
+        // Backoff tăng dần (600ms, 1.2s, 2.4s, 4.8s — chặn tối đa 5s) trước khi
+        // thử lại CÙNG nhà này: cho lỗi "quá tải tạm thời" của Gemini thời gian hồi.
+        await new Promise((r) => setTimeout(r, Math.min(600 * 2 ** attemptIdx, 5000)));
       }
     }
   }
