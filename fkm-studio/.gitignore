@@ -40,6 +40,7 @@ src-tauri/target
 # Real backend URL used to build native apps — không commit URL thật nếu
 # chứa thông tin riêng, chỉ commit .env.production.example làm mẫu
 .env.production
+.env
 
 # Deploy secrets — không commit
 deploy/render-env.local.txt

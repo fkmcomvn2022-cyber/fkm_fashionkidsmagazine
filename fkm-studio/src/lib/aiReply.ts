@@ -79,6 +79,15 @@ export interface AiAutoReplySettings {
   // push báo lại (không im lặng — anh đã chọn rõ ở bước hỏi thiết kế). Để
   // trống/undefined = server tự dùng mặc định 30 phút.
   pauseMinutesAfterStaffReply?: number;
+  // Giới hạn ĐỘ DÀI mỗi câu trả lời (token đầu ra) — studio tự kéo để cân tiền
+  // token vs. độ đầy đủ. Trống = server dùng mặc định 300. ~1 token ≈ 0,75 từ.
+  maxReplyTokens?: number;
+  // Tóm tắt lịch sử: bật thì các tin CŨ (vượt số tin giữ nguyên gần nhất) được
+  // tóm tắt thành 1 đoạn ngắn (trí nhớ dài hạn), thay vì gửi lại toàn bộ tin —
+  // tiết kiệm token cho hội thoại dài. summaryKeepRecent = số tin gần nhất giữ
+  // nguyên nội dung (mặc định 12). Mặc định TẮT.
+  summarizeOldHistory?: boolean;
+  summaryKeepRecent?: number;
 }
 
 // 3 nghiệp vụ thật đã có sẵn trong app, an toàn để AI tự gọi (không tạo đơn
@@ -176,6 +185,9 @@ export let aiAutoReplySettings: AiAutoReplySettings = {
   functions: DEFAULT_AI_FUNCTIONS,
   historyWindow: 50,
   temperature: 0.4,
+  maxReplyTokens: 300,
+  summarizeOldHistory: false,
+  summaryKeepRecent: 12,
 };
 
 export function setAiAutoReplySettings(next: AiAutoReplySettings) {

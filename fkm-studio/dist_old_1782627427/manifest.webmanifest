@@ -1,0 +1,13 @@
+{
+  "name": "FKM Studio",
+  "short_name": "FKM Studio",
+  "description": "Quản lý lịch chụp, khách hàng và thông báo cho FKM Studio",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0b10",
+  "theme_color": "#7c3aed",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

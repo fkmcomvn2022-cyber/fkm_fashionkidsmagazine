@@ -30,6 +30,7 @@ import {
   generateAiReply,
   generateImageReply,
   splitReplyIntoMessages,
+  summarizeConversation,
   type AiFunctionConfig,
   type ChatTurn,
 } from "./ai.js";
@@ -283,14 +284,62 @@ app.post("/api/assistant/chat", async (req, res) => {
   }
   const state = (await readState()) ?? {};
   try {
-    const reply = await generateAssistantReply({ state, history });
+    const result = await generateAssistantReply({ state, history });
+    if (result == null) {
+      res.json({ ok: false, error: "no_reply" });
+      return;
+    }
+    res.json({ ok: true, reply: result.reply, action: result.action });
+  } catch (err) {
+    console.error("[assistant] Lỗi xử lý chat trợ lý nội bộ:", err);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
+// --- Khu TEST AI trả lời KHÁCH (Cài đặt > AI) -------------------------------
+// Cho chủ studio thử "nếu khách nhắn câu này, AI sẽ trả lời thế nào" theo đúng
+// cấu hình prompt hiện tại — để test mỗi khi sửa persona/mô tả/sản phẩm/kỹ năng.
+// AN TOÀN tuyệt đối: KHÔNG gửi tin cho ai, KHÔNG ghi state, và functions = []
+// (không chạy hành động tạo đơn/xác nhận cọc), chỉ sinh câu trả lời để xem.
+app.post("/api/ai/test-reply", async (req, res) => {
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  if (!message) {
+    res.status(400).json({ ok: false, error: "missing_message" });
+    return;
+  }
+  const state = (await readState()) ?? {};
+  const aiSettings = (state.aiAutoReplySettings ?? {}) as {
+    customPrompt?: string;
+    constraintsPrompt?: string;
+    personaPrompt?: string;
+    descriptionPrompt?: string;
+    productPrompt?: string;
+    skillPrompt?: string;
+    historyWindow?: number;
+    temperature?: number;
+    maxReplyTokens?: number;
+  };
+  try {
+    const testCustomer = { id: "__test__", name: "Khách thử nghiệm" };
+    const history: ChatTurn[] = [{ fromCustomer: true, text: message }];
+    const reply = await generateAiReply({
+      state,
+      customer: testCustomer,
+      history,
+      studioContext: buildStudioContext(state),
+      customPrompt: buildCombinedCustomPrompt(aiSettings),
+      functions: [], // không chạy hành động — chỉ test câu trả lời
+      historyWindow: aiSettings.historyWindow,
+      temperature: aiSettings.temperature,
+      maxReplyTokens: aiSettings.maxReplyTokens,
+    });
     if (reply == null) {
       res.json({ ok: false, error: "no_reply" });
       return;
     }
-    res.json({ ok: true, reply });
+    res.json({ ok: true, reply, chunks: splitReplyIntoMessages(reply) });
   } catch (err) {
-    console.error("[assistant] Lỗi xử lý chat trợ lý nội bộ:", err);
+    console.error("[ai-test] Lỗi khi test AI trả lời khách:", err);
     res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
@@ -569,6 +618,9 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
           functions?: AiFunctionConfig[];
           historyWindow?: number;
           temperature?: number;
+          maxReplyTokens?: number;
+          summarizeOldHistory?: boolean;
+          summaryKeepRecent?: number;
         }
       | undefined;
 
@@ -594,15 +646,44 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
         const history: ChatTurn[] = allMessages
           .filter((m) => m.customerId === customer.id)
           .map((m) => ({ fromCustomer: !!m.fromCustomer, text: String(m.text ?? "") }));
+
+        // Tóm tắt lịch sử (tuỳ chọn, xem Cài đặt > AI): khi hội thoại dài hơn
+        // "số tin giữ nguyên gần nhất", các tin CŨ hơn được tóm tắt thành 1 đoạn
+        // ngắn cache trên khách (aiHistorySummary), và chỉ gửi tóm tắt + tin gần
+        // nhất cho AI — thay vì gửi lại toàn bộ tin từ đầu. Chỉ tóm tắt LẠI khi
+        // có thêm tin cũ mới (older > số đã tóm tắt), tránh gọi AI tóm tắt mỗi lần.
+        let historySummary: string | undefined;
+        let historyForAi = history;
+        if (aiSettings.summarizeOldHistory) {
+          const keepRecent = aiSettings.summaryKeepRecent ?? 12;
+          if (history.length > keepRecent) {
+            const older = history.slice(0, history.length - keepRecent);
+            const recent = history.slice(history.length - keepRecent);
+            const cust = customer as { aiHistorySummary?: string; aiHistorySummaryCount?: number };
+            const cachedCount = cust.aiHistorySummaryCount ?? 0;
+            if (older.length > cachedCount) {
+              const newSummary = await summarizeConversation(older, cust.aiHistorySummary);
+              if (newSummary) {
+                cust.aiHistorySummary = newSummary;
+                cust.aiHistorySummaryCount = older.length;
+              }
+            }
+            historySummary = cust.aiHistorySummary;
+            historyForAi = recent;
+          }
+        }
+
         const reply = await generateAiReply({
           state,
           customer,
-          history,
+          history: historyForAi,
           studioContext: buildStudioContext(state),
           customPrompt: buildCombinedCustomPrompt(aiSettings),
           functions: aiSettings.functions ?? [],
           historyWindow: aiSettings.historyWindow,
           temperature: aiSettings.temperature,
+          maxReplyTokens: aiSettings.maxReplyTokens,
+          historySummary,
         });
         if (reply) {
           const sentAny = await sendAiReplyChunks(state, customer, reply, FB_PAGE_ACCESS_TOKEN);

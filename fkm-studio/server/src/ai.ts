@@ -638,7 +638,7 @@ async function runGeminiTextLoop(cfg: AiProviderConfig, ctx: AiReplyContext, sys
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents,
       ...(tools ? { tools } : {}),
-      generationConfig: { temperature: ctx.temperature ?? 0.4, maxOutputTokens: 300 },
+      generationConfig: { temperature: ctx.temperature ?? 0.4, maxOutputTokens: ctx.maxReplyTokens ?? 300 },
     });
 
     const parts = data.candidates?.[0]?.content?.parts ?? [];
@@ -761,7 +761,7 @@ async function runOpenAiCompatibleTextLoop(baseUrl: string, cfg: AiProviderConfi
   ];
 
   for (let round = 0; round < MAX_FUNCTION_CALL_ROUNDS; round++) {
-    const message = await callOpenAiCompatible(baseUrl, cfg, messages, tools, 300, ctx.temperature ?? 0.4);
+    const message = await callOpenAiCompatible(baseUrl, cfg, messages, tools, ctx.maxReplyTokens ?? 300, ctx.temperature ?? 0.4);
     const toolCalls = message.tool_calls ?? [];
     if (toolCalls.length === 0) {
       const text = typeof message.content === "string" ? message.content.trim() : "";
@@ -859,6 +859,13 @@ export interface AiReplyContext {
   // cao = trả lời tự nhiên/đa dạng hơn nhưng dễ lệch ý).
   historyWindow?: number;
   temperature?: number;
+  // Giới hạn ĐỘ DÀI mỗi câu trả lời (token đầu ra) — studio tự chỉnh ở Cài đặt
+  // > AI để cân tiền token vs. độ đầy đủ. Trống = mặc định 300.
+  maxReplyTokens?: number;
+  // Tóm tắt các tin CŨ (đã vượt cửa sổ tin gần nhất) thành 1 đoạn ngắn, đưa vào
+  // system prompt làm "trí nhớ dài hạn" — để hội thoại dài không phải gửi lại
+  // toàn bộ tin từ đầu (tiết kiệm token). index.ts tự tính + cache trên khách.
+  historySummary?: string;
 }
 
 /**
@@ -879,12 +886,47 @@ export function splitReplyIntoMessages(text: string): string[] {
 
 export async function generateAiReply(ctx: AiReplyContext): Promise<string | null> {
   const extra = ctx.customPrompt?.trim() ? `\n\nHướng dẫn thêm từ studio:\n${ctx.customPrompt.trim()}` : "";
-  const systemPrompt = `${systemPromptHeader()}${extra}\n\nThông tin studio:\n${ctx.studioContext}`;
+  const summary = ctx.historySummary?.trim()
+    ? `\n\nTóm tắt hội thoại trước đó với khách này (trí nhớ dài hạn — dùng để hiểu bối cảnh, KHÔNG nhắc lại máy móc cho khách):\n${ctx.historySummary.trim()}`
+    : "";
+  const systemPrompt = `${systemPromptHeader()}${extra}\n\nThông tin studio:\n${ctx.studioContext}${summary}`;
 
   return withProviderFallback("text", (cfg) => {
     if (cfg.provider === "gemini") return runGeminiTextLoop(cfg, ctx, systemPrompt);
     if (cfg.provider === "openai") return runOpenAiCompatibleTextLoop(OPENAI_BASE_URL, cfg, ctx, systemPrompt);
     return runOpenAiCompatibleTextLoop(DEEPSEEK_BASE_URL, cfg, ctx, systemPrompt);
+  });
+}
+
+/**
+ * Tóm tắt các tin CŨ thành 1 đoạn ngắn (trí nhớ dài hạn) — để hội thoại dài
+ * không phải gửi lại toàn bộ tin từ đầu mỗi lần AI trả lời (tiết kiệm token).
+ * Gộp dồn: nếu đã có tóm tắt trước (prevSummary), nhập thêm tin mới vào, không
+ * lặp. Dùng chung cơ chế đa nhà cung cấp + retry như trả lời thường. Trả null
+ * nếu không tóm tắt được (giữ nguyên prevSummary ở nơi gọi).
+ */
+export async function summarizeConversation(turns: ChatTurn[], prevSummary?: string): Promise<string | null> {
+  if (turns.length === 0) return prevSummary ?? null;
+  const convoText = turns.map((t) => `${t.fromCustomer ? "Khách" : "Studio/AI"}: ${t.text}`).join("\n");
+  const instruction =
+    "Tóm tắt NGẮN GỌN (tối đa ~120 từ, tiếng Việt, văn xuôi thuần, KHÔNG markdown) bối cảnh hội thoại giữa studio ảnh và 1 khách, để AI dùng làm trí nhớ cho các tin sau. Giữ lại: nhu cầu/concept khách quan tâm, ngày/giờ đã bàn, thông tin khách (tên/sđt/bé), đã chốt hay cọc gì chưa, điểm cần nhớ. Bỏ chi tiết vụn vặt, không bịa thêm." +
+    (prevSummary ? `\n\nTóm tắt trước đó (nhập thêm tin mới vào, gộp lại, không lặp):\n${prevSummary}` : "") +
+    `\n\nHội thoại cần tóm tắt:\n${convoText}`;
+
+  return withProviderFallback("text", async (cfg) => {
+    if (cfg.provider === "gemini") {
+      const data = await callGemini(cfg, {
+        contents: [{ role: "user", parts: [{ text: instruction }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 220 },
+      });
+      const parts = data.candidates?.[0]?.content?.parts ?? [];
+      const text = parts.map((p) => p.text ?? "").join("").trim();
+      return text || null;
+    }
+    const baseUrl = cfg.provider === "openai" ? OPENAI_BASE_URL : DEEPSEEK_BASE_URL;
+    const msg = await callOpenAiCompatible(baseUrl, cfg, [{ role: "user", content: instruction }], undefined, 220, 0);
+    const text = typeof msg.content === "string" ? msg.content.trim() : "";
+    return text || null;
   });
 }
 

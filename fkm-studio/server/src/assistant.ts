@@ -130,6 +130,21 @@ const FUNCTION_SCHEMAS: Record<string, Record<string, unknown>> = {
       toDate: { type: "STRING", description: "Đến ngày, dạng YYYY-MM-DD." },
     },
   },
+  tao_don_hang: {
+    type: "OBJECT",
+    properties: {
+      customerName: { type: "STRING", description: "Tên khách hàng (bắt buộc)." },
+      customerPhone: { type: "STRING", description: "Số điện thoại khách, nếu có." },
+      conceptName: { type: "STRING", description: "Tên concept/gói chụp — PHẢI khớp 1 trong các concept đang có (đã liệt kê trong hướng dẫn)." },
+      date: { type: "STRING", description: "Ngày chụp, dạng YYYY-MM-DD. Tự suy ra ngày thật từ 'hôm nay', 'mai', 'thứ 7 này'..." },
+      time: { type: "STRING", description: "Giờ chụp, dạng HH:mm 24 giờ (vd 09:30, 14:00)." },
+      peopleCount: { type: "NUMBER", description: "Số người chụp. Mặc định 1 nếu không nói." },
+      audience: { type: "STRING", description: "'Trẻ em' hoặc 'Người lớn'. Mặc định 'Trẻ em' (studio chụp ảnh thiếu nhi)." },
+      deposit: { type: "NUMBER", description: "Tiền cọc đã thu (VND). Mặc định 0 nếu không nói." },
+      notes: { type: "STRING", description: "Ghi chú thêm cho đơn, nếu có." },
+    },
+    required: ["customerName", "conceptName", "date", "time"],
+  },
 };
 
 const FUNCTION_DESCRIPTIONS: Record<string, string> = {
@@ -139,6 +154,7 @@ const FUNCTION_DESCRIPTIONS: Record<string, string> = {
   get_staff_workload: "Đếm số ca mỗi nhân sự (Photo/Makeup/Stylist) được phân công trong 1 khoảng ngày — để biết ai đang bận/rảnh.",
   get_customer_info: "Tra cứu 1 khách theo tên hoặc số điện thoại — lịch sử đơn, tổng chi tiêu, nhãn (VIP/Mới/Thân thiết).",
   get_concept_performance: "Tổng hợp doanh thu + số đơn theo từng concept trong 1 khoảng ngày — để biết concept nào bán tốt.",
+  tao_don_hang: "TẠO 1 đơn hàng/lịch chụp mới khi chủ studio yêu cầu (vd 'tạo đơn cho chị Lan concept Thu Mơ 9h mai', 'đặt lịch...', 'thêm đơn...'). Chỉ gọi khi đã đủ tối thiểu: tên khách, concept, ngày, giờ — nếu thiếu thì HỎI LẠI chứ đừng tự bịa.",
 };
 
 function buildToolDeclaration(key: string) {
@@ -315,12 +331,24 @@ const SYSTEM_PROMPT_BASE = `Bạn là trợ lý AI nội bộ của FKM Studio, 
 - Xưng "em", gọi chủ studio là "anh/chị" (trung tính nếu chưa rõ), trả lời ngắn gọn, rõ số liệu, đi thẳng vào việc — không cần lịch sự khách sáo như khi nói chuyện với khách.
 - LUÔN dùng đúng số liệu lấy được từ các hàm tra cứu (get_revenue_summary, get_upcoming_schedule, get_unpaid_orders, get_staff_workload, get_customer_info, get_concept_performance) — KHÔNG tự đoán/bịa số nếu câu hỏi cần dữ liệu thật, hãy gọi hàm phù hợp trước khi trả lời.
 - Khi không chắc khoảng ngày chủ studio muốn hỏi, cứ chọn khoảng hợp lý (vd "tuần này" = hôm nay tới 7 ngày sau) rồi nói rõ khoảng đã chọn trong câu trả lời.
-- Có thể đưa ra nhận xét/gợi ý ngắn dựa trên số liệu (vd "có 3 đơn còn nợ tiền, nên nhắc cọc trước ngày chụp"), nhưng đây chỉ là gợi ý, không tự thực hiện hành động gì (không tự sửa đơn/nhắn khách) — trợ lý này chỉ tra cứu, mọi hành động chủ studio tự làm trong app.
+- Có thể đưa ra nhận xét/gợi ý ngắn dựa trên số liệu (vd "có 3 đơn còn nợ tiền, nên nhắc cọc trước ngày chụp").
+- NGOÀI tra cứu, em CÓ THỂ TẠO ĐƠN HÀNG/LỊCH CHỤP mới giúp chủ studio qua hàm tao_don_hang. Khi chủ studio bảo "tạo đơn/đặt lịch/thêm đơn..." thì:
+  · Suy ra ngày thật từ lời nói (hôm nay/mai/thứ 7 này...) ra dạng YYYY-MM-DD, giờ ra HH:mm.
+  · conceptName phải khớp 1 trong các concept đang có (xem danh sách bên dưới). Nếu chủ studio nói tên gần đúng, chọn concept gần nhất; nếu không rõ concept nào thì HỎI LẠI.
+  · Nếu thiếu tên khách / ngày / giờ thì HỎI LẠI cho đủ rồi mới gọi hàm — KHÔNG tự bịa.
+  · Sau khi gọi hàm tạo đơn, app sẽ tự lưu đơn; em chỉ cần xác nhận ngắn gọn.
 - Trả lời bằng tiếng Việt, có thể dùng số liệu dạng gạch đầu dòng ngắn nếu nhiều mục, nhưng đừng dài dòng không cần thiết.`;
 
-/** SYSTEM_PROMPT_BASE + dòng ngày/giờ thực (tính lại mỗi lần gọi). */
-function systemPrompt(): string {
-  return `${SYSTEM_PROMPT_BASE}\n- ${currentVietnamTimeLine()}`;
+/** SYSTEM_PROMPT_BASE + danh sách concept (để map tên khi tạo đơn) + dòng
+ * ngày/giờ thực (tính lại mỗi lần gọi, để AI suy ra ngày tương đối cho đúng). */
+function systemPrompt(state: StateSnapshot): string {
+  const conceptNames = conceptsOf(state)
+    .map((c) => c.name)
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+  const conceptLine = conceptNames.length
+    ? `Các concept đang có (dùng đúng tên này khi tạo đơn): ${conceptNames.join(", ")}.`
+    : "Hiện chưa có concept nào — nếu chủ studio muốn tạo đơn, hãy báo cần tạo concept trước.";
+  return `${SYSTEM_PROMPT_BASE}\n- ${conceptLine}\n- ${currentVietnamTimeLine()}`;
 }
 
 export interface AssistantReplyContext {
@@ -328,7 +356,21 @@ export interface AssistantReplyContext {
   history: AssistantTurn[];
 }
 
-export async function generateAssistantReply(ctx: AssistantReplyContext): Promise<string | null> {
+/** Hành động AI muốn app THỰC THI phía client (server không tự ghi vì dữ liệu
+ * thật nằm ở localStorage của client). Hiện chỉ có tạo đơn; sau này có thể
+ * thêm các action khác (sửa đơn, nhắc khách...). */
+export interface AssistantCreateOrderAction {
+  type: "create_order";
+  args: Record<string, unknown>;
+}
+export type AssistantAction = AssistantCreateOrderAction;
+
+export interface AssistantReplyResult {
+  reply: string;
+  action?: AssistantAction;
+}
+
+export async function generateAssistantReply(ctx: AssistantReplyContext): Promise<AssistantReplyResult | null> {
   if (!GEMINI_API_KEY) return null;
 
   const recent = ctx.history.slice(-20);
@@ -349,7 +391,7 @@ export async function generateAssistantReply(ctx: AssistantReplyContext): Promis
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt() }] },
+            systemInstruction: { parts: [{ text: systemPrompt(ctx.state) }] },
             contents,
             tools: ALL_TOOLS,
             generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
@@ -371,7 +413,19 @@ export async function generateAssistantReply(ctx: AssistantReplyContext): Promis
 
     if (functionCallParts.length === 0) {
       const text = parts.map((p) => p.text ?? "").join("").trim();
-      return text || null;
+      return text ? { reply: text } : null;
+    }
+
+    // Nếu AI muốn TẠO ĐƠN: KHÔNG thực thi ở server (dữ liệu thật nằm ở client),
+    // mà trả args về để client tự gọi createOrder() + lưu. Dừng vòng tại đây.
+    const createCall = functionCallParts.find((p) => p.functionCall!.name === "tao_don_hang");
+    if (createCall) {
+      const args = createCall.functionCall!.args ?? {};
+      const modelText = parts.map((p) => p.text ?? "").join("").trim();
+      return {
+        reply: modelText || "Em tạo đơn ngay đây ạ.",
+        action: { type: "create_order", args },
+      };
     }
 
     contents.push({ role: "model", parts });

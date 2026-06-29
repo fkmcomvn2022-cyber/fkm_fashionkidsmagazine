@@ -1,0 +1,26 @@
+[debug] [2026-06-27T22:45:44.098Z] ----------------------------------------------------------------------
+[debug] [2026-06-27T22:45:44.099Z] Command:       /usr/bin/node /sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/.bin/firebase deploy --only hosting --project app-fkm-claude-code
+[debug] [2026-06-27T22:45:44.099Z] CLI Version:   14.27.0
+[debug] [2026-06-27T22:45:44.099Z] Platform:      linux
+[debug] [2026-06-27T22:45:44.099Z] Node Version:  v22.22.3
+[debug] [2026-06-27T22:45:44.099Z] Time:          Sat Jun 27 2026 22:45:44 GMT+0000 (Coordinated Universal Time)
+[debug] [2026-06-27T22:45:44.099Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-06-27T22:45:44.100Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-06-27T22:45:44.190Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-06-27T22:45:44.204Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 403
+[debug] [2026-06-27T22:45:44.204Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json "Connection blocked by network allowlist"
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-06-27T22:45:44.204Z] Failed to fetch MOTD FirebaseError: Unable to parse JSON: SyntaxError: Unexpected token 'C', "Connection"... is not valid JSON
+[debug] [2026-06-27T22:45:44.206Z] Error: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.
+    at GoogleAuth.getApplicationDefaultAsync (/sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/google-auth-library/build/src/auth/googleauth.js:287:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async GoogleAuth._GoogleAuth_determineClient (/sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/google-auth-library/build/src/auth/googleauth.js:834:32)
+    at async GoogleAuth.getClient (/sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/google-auth-library/build/src/auth/googleauth.js:698:20)
+    at async GoogleAuth.getAccessToken (/sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/google-auth-library/build/src/auth/googleauth.js:722:24)
+    at async autoAuth (/sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/firebase-tools/lib/requireAuth.js:28:19)
+    at async requireAuth (/sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/firebase-tools/lib/requireAuth.js:91:20)
+    at async requirePermissions (/sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/firebase-tools/lib/requirePermissions.js:17:5)
+    at async /sessions/zen-sleepy-thompson/mnt/App FKM/fkm-studio/node_modules/firebase-tools/lib/command.js:259:17
+[error] 
+[error] Error: Failed to authenticate, have you run firebase login?

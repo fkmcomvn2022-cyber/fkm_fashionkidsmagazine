@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import { concepts } from "@/data";
 import { persistAll } from "@/lib/persistence";
+import { getHideSamplePref, hideSampleData, showSampleData } from "@/lib/demoView";
 
 interface AppStateValue {
   isDemo: boolean;
@@ -25,14 +26,27 @@ interface AppStateValue {
 const AppStateContext = createContext<AppStateValue | null>(null);
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const [isDemo, setIsDemo] = useState(true);
+  // isDemo = true (DEMO): hiện cả dữ liệu mẫu; false (THẬT): ẩn dữ liệu mẫu.
+  // Khởi tạo theo lựa chọn đã lưu (demoView) để giữ đúng chế độ sau khi tải lại.
+  const [isDemo, setIsDemo] = useState(() => !getHideSamplePref());
   const [activeConceptId, setActiveConceptId] = useState(concepts[0]?.id ?? "");
   const [refreshing, setRefreshing] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddPrefill, setQuickAddPrefill] = useState<{ date: string; time: string } | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
 
-  const toggleDemo = useCallback(() => setIsDemo((v) => !v), []);
+  // Bật/tắt giữa DEMO (hiện mẫu) và THẬT (ẩn mẫu). Đây chỉ là LỌC XEM nên CHỈ
+  // bump dataVersion để mọi màn render lại, KHÔNG persistAll (không ghi đè
+  // localStorage) — dữ liệu mẫu vẫn còn nguyên trong stash + bộ nhớ lưu trữ.
+  const toggleDemo = useCallback(() => {
+    setIsDemo((prev) => {
+      const next = !prev;
+      if (next) showSampleData();
+      else hideSampleData();
+      return next;
+    });
+    setDataVersion((v) => v + 1);
+  }, []);
 
   const openQuickAddOrder = useCallback((date: string, time: string) => {
     setQuickAddPrefill({ date, time });

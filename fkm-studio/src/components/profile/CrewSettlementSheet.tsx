@@ -3,7 +3,7 @@ import { CheckCircle2, Wallet } from "lucide-react";
 import { Sheet } from "@/components/ui/Sheet";
 import { Button } from "@/components/ui/Button";
 import { previewCrewSettlement, confirmCrewSettlement, staffForCrewRole, staffById, type SettlementPreview } from "@/data";
-import { formatVND, addDays } from "@/lib/format";
+import { formatVND, addDays, todayIso } from "@/lib/format";
 import { useAppState } from "@/lib/appState";
 import type { CrewSettlementRole } from "@/types";
 
@@ -11,10 +11,6 @@ const roles: CrewSettlementRole[] = ["Photo", "Makeup", "Stylist", "Retoucher"];
 
 const inputClass =
   "w-full rounded-2xl border border-border-soft bg-surface-soft px-3.5 py-2.5 text-sm text-ink outline-none focus:border-brand-blue";
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /**
  * Sổ quyết toán công thợ — học theo `api_settleCrewPayment_impl` của bản Apps

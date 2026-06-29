@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ArrowDown, ArrowUp, KeyRound, Loader2, Check, AlertCircle } from "lucide-react";
+import { ArrowLeft, ArrowDown, ArrowUp, KeyRound, Loader2, Check, AlertCircle, Send, MessageCircle } from "lucide-react";
 import { Sparkles, Wand2 } from "lucide-react";
 import { Panel } from "@/components/ui/Card";
+import { BACKEND_URL } from "@/lib/persistence";
 import { aiAutoReplySettings, setAiAutoReplySettings, type AiFunctionConfig } from "@/lib/aiReply";
 import {
   fetchAiProviders,
@@ -216,6 +217,41 @@ export default function AiSettingsPage() {
     });
   };
 
+  // --- Khu thử AI trả lời khách (an toàn, không gửi/không ghi) ---
+  const [testMsg, setTestMsg] = useState("");
+  const [testReply, setTestReply] = useState<string[] | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  const runTest = async () => {
+    const msg = testMsg.trim();
+    if (!msg || testing) return;
+    setTesting(true);
+    setTestError(null);
+    setTestReply(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/ai/test-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg }),
+      });
+      const json = (await res.json()) as { ok: boolean; chunks?: string[]; reply?: string; error?: string };
+      if (!json.ok) {
+        setTestError(
+          json.error === "no_reply"
+            ? "Server chưa cấu hình API key AI, hoặc AI không trả lời được — kiểm tra phần Nhà cung cấp AI ở trên."
+            : "Không gọi được server để thử — kiểm tra mạng/Backend URL.",
+        );
+        return;
+      }
+      setTestReply(json.chunks?.length ? json.chunks : [json.reply ?? ""]);
+    } catch {
+      setTestError("Không kết nối được server — kiểm tra mạng hoặc thử lại.");
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2.5">
@@ -269,6 +305,58 @@ export default function AiSettingsPage() {
               <span>Bám sát dữ liệu thật</span>
               <span>Tự nhiên, đa dạng câu chữ</span>
             </div>
+          </div>
+
+          <div className="h-px bg-border-soft" />
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[12px] font-medium text-ink">Độ dài tối đa mỗi câu trả lời</p>
+              <span className="text-[12px] font-semibold text-brand-blue">{settings.maxReplyTokens ?? 300} token</span>
+            </div>
+            <input
+              type="range"
+              min={100}
+              max={800}
+              step={50}
+              value={settings.maxReplyTokens ?? 300}
+              onChange={(e) => save({ ...settings, maxReplyTokens: Number(e.target.value) })}
+              className="w-full"
+            />
+            <p className="text-[10px] text-muted px-0.5 mt-1">Giới hạn độ dài AI trả lời khách — thấp = câu ngắn, ít tốn token; cao = trả lời đầy đủ hơn nhưng tốn token hơn. 1 token ≈ 0,75 từ tiếng Việt (300 token ≈ 4–6 câu). Anh kéo thử rồi xem ở khu "Thử AI trả lời khách" bên dưới.</p>
+          </div>
+
+          <div className="h-px bg-border-soft" />
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[12px] font-medium text-ink">Tóm tắt lịch sử hội thoại dài</p>
+              <Toggle
+                checked={settings.summarizeOldHistory ?? false}
+                onChange={() => save({ ...settings, summarizeOldHistory: !(settings.summarizeOldHistory ?? false) })}
+              />
+            </div>
+            <p className="text-[10px] text-muted px-0.5 mt-1">
+              Khi hội thoại dài, các tin CŨ được tóm tắt thành 1 đoạn ngắn (trí nhớ), thay vì gửi lại toàn bộ tin mỗi lần trả lời — tiết kiệm token mà AI vẫn nhớ bối cảnh. Tắt = luôn gửi tin theo "Số tin nhớ" ở trên.
+            </p>
+            {(settings.summarizeOldHistory ?? false) && (
+              <div className="mt-2">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[12px] font-medium text-ink">Số tin gần nhất giữ nguyên</p>
+                  <span className="text-[12px] font-semibold text-brand-blue">{settings.summaryKeepRecent ?? 12} tin</span>
+                </div>
+                <input
+                  type="range"
+                  min={6}
+                  max={30}
+                  step={2}
+                  value={settings.summaryKeepRecent ?? 12}
+                  onChange={(e) => save({ ...settings, summaryKeepRecent: Number(e.target.value) })}
+                  className="w-full"
+                />
+                <p className="text-[10px] text-muted px-0.5 mt-1">Số tin mới nhất luôn gửi nguyên văn; tin cũ hơn mới bị tóm tắt. Thấp = tiết kiệm token hơn nhưng AI nhớ chi tiết gần đây ít hơn.</p>
+              </div>
+            )}
           </div>
 
           <div className="h-px bg-border-soft" />
@@ -347,6 +435,48 @@ export default function AiSettingsPage() {
               className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
             />
           </div>
+        </div>
+      </Panel>
+
+      <Panel
+        title="Thử AI trả lời khách"
+        subtitle="Gõ thử 1 tin như khách sẽ nhắn, xem AI trả lời thế nào theo cấu hình hiện tại. AN TOÀN: không gửi cho ai, không tạo đơn/đụng dữ liệu — chỉ xem câu trả lời."
+        action={<MessageCircle size={16} className="text-brand-blue" />}
+      >
+        <div className="flex flex-col gap-2">
+          <textarea
+            value={testMsg}
+            onChange={(e) => setTestMsg(e.target.value)}
+            placeholder='Vd: "Bé nhà mình 3 tuổi, muốn chụp concept Thu Mơ cuối tuần này giá sao ạ?"'
+            rows={2}
+            className="w-full rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
+          />
+          <button
+            onClick={runTest}
+            disabled={testing || !testMsg.trim()}
+            className="self-end flex items-center gap-1.5 rounded-full bg-brand-blue text-white text-[12px] font-semibold px-4 py-2 tap-scale disabled:opacity-50"
+          >
+            {testing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            {testing ? "Đang thử..." : "Thử trả lời"}
+          </button>
+
+          {testError && (
+            <div className="flex items-start gap-2 rounded-2xl border border-border-soft p-2.5">
+              <AlertCircle size={14} className="text-danger shrink-0 mt-0.5" />
+              <p className="text-[11px] text-ink-soft">{testError}</p>
+            </div>
+          )}
+
+          {testReply && (
+            <div className="flex flex-col gap-1.5 mt-1">
+              <p className="text-[10px] text-muted px-0.5">AI sẽ trả lời khách{testReply.length > 1 ? ` (${testReply.length} tin liên tiếp)` : ""}:</p>
+              {testReply.map((chunk, i) => (
+                <div key={i} className="self-start max-w-[90%] rounded-2xl rounded-bl-md bg-surface-soft text-ink px-3.5 py-2 text-[13px] whitespace-pre-wrap">
+                  {chunk}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Panel>
 

@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Wallet, Database, Settings, Bot, ChevronRight } from "lucide-react";
 
 const items = [
-  { to: "/assistant", icon: Bot, label: "Trợ lý AI nội bộ", desc: "Hỏi nhanh doanh thu, lịch, nhân sự, khách hàng", color: "#2bb673", bg: "#e3f7ec" },
+  { to: "/assistant", icon: Bot, label: "Trợ lý AI nội bộ", desc: "Hỏi số liệu, hoặc tạo đơn bằng chat/giọng nói", color: "#2bb673", bg: "#e3f7ec" },
   { to: "/finance", icon: Wallet, label: "Trung tâm Tài chính", desc: "Doanh thu, chi phí, lợi nhuận theo concept", color: "#4f6df5", bg: "#e8edff" },
   { to: "/data-center", icon: Database, label: "Trung tâm Dữ liệu", desc: "Quản lý database, Google Drive, backup", color: "#9b5cf6", bg: "#efe7ff" },
   { to: "/settings", icon: Settings, label: "Thiết lập", desc: "Messenger, AI, Thanh toán, Hệ thống", color: "#ff9447", bg: "#fff1e2" },

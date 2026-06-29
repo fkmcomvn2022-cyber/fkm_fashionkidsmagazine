@@ -29,6 +29,8 @@ import { vietQRSettings, setVietQRSettings, type VietQRSettings } from "@/lib/pa
 import { reminderSettings, setReminderSettings, type ReminderSettings } from "@/lib/reminders";
 import { aiAutoReplySettings, setAiAutoReplySettings, type AiAutoReplySettings } from "@/lib/aiReply";
 import { automationSettings, setAutomationSettings, type AutomationSettings } from "@/lib/automation";
+import { SAMPLE_IDS } from "@/lib/sampleIds";
+import { getHiddenSampleStash, showSampleData, dropHiddenSampleStash } from "@/lib/demoView";
 import type { Order, Customer, Concept, Staff, InventoryItem, AddonService, Expense, Message, CrewSettlement } from "@/types";
 
 const STORAGE_KEY = "fkm-studio-data-v1";
@@ -113,15 +115,21 @@ function applySnapshot(snap: Partial<PersistedSnapshot>): void {
  * (xuất file JSON cho người dùng tự giữ). Tách riêng để 2 nơi luôn lấy đúng
  * cùng 1 bộ dữ liệu, không lặp code. */
 function buildSnapshot(): PersistedSnapshot {
+  // Khi đang ở chế độ THẬT (ẩn dữ liệu mẫu, xem demoView.ts), các bản ghi mẫu
+  // đã bị cắt khỏi mảng sống và cất trong stash. Phải GỘP lại khi lưu, nếu
+  // không mỗi lần persistAll() (vd. tạo đơn thật) sẽ ghi đè localStorage thiếu
+  // mất dữ liệu mẫu -> tải lại trang sẽ mất mẫu dù chỉ đang "ẩn" chứ chưa xoá.
+  const hidden = getHiddenSampleStash();
+  const merge = <T>(live: T[], extra: T[] | undefined) => (extra && extra.length ? [...live, ...extra] : live);
   return {
-    orders,
-    customers,
-    concepts,
-    staff,
-    inventory,
-    addonServices,
-    expenses,
-    messages,
+    orders: merge(orders, hidden?.orders),
+    customers: merge(customers, hidden?.customers),
+    concepts: merge(concepts, hidden?.concepts),
+    staff: merge(staff, hidden?.staff),
+    inventory: merge(inventory, hidden?.inventory),
+    addonServices: merge(addonServices, hidden?.addonServices),
+    expenses: merge(expenses, hidden?.expenses),
+    messages: merge(messages, hidden?.messages),
     crewSettlements,
     breakWindowSettings,
     vietQRSettings,
@@ -357,27 +365,11 @@ export function resetToSampleData(): void {
   } catch (err) {
     console.warn("Không thể xoá dữ liệu đã lưu.", err);
   }
+  // Quay về chế độ DEMO (hiện dữ liệu mẫu) sau khi reset — bỏ stash đang ẩn (nếu
+  // có) và đặt lại cờ ẩn/hiện, để lần tải lại tới hiện đầy đủ dữ liệu mẫu seed.
+  dropHiddenSampleStash();
   window.location.reload();
 }
-
-/**
- * ID gốc của dữ liệu mẫu (seed) — viết cứng, KHÔNG tính lại từ dữ liệu đang
- * có, vì mục đích là lọc bỏ chính xác các bản ghi mẫu ban đầu này dù người
- * dùng đã sửa/lưu gì sau đó. Mọi bản ghi tạo qua app thật (createOrder,
- * findOrCreateCustomer, createConcept, createStaff...) đều sinh ID lớn hơn
- * các số này (nextNumericId quét ID lớn nhất hiện có rồi +1), nên không bao
- * giờ trùng vào nhóm này về sau.
- */
-const SAMPLE_IDS = {
-  orders: new Set(["o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8", "o9", "o10"]),
-  customers: new Set(["u1", "u2", "u3", "u4", "u5", "u6", "u7"]),
-  concepts: new Set(["c1", "c2", "c3", "c4", "c5"]),
-  staff: new Set(["s1", "s2", "s3", "s4", "s5", "s6", "s7"]),
-  inventory: new Set(["i1", "i2", "i3", "i4", "i5", "i6", "i7"]),
-  addonServices: new Set(["sv1", "sv2", "sv3", "sv4", "sv5", "sv6", "sv7", "sv8", "sv9"]),
-  expenses: new Set(["e1", "e2", "e3", "e4", "e5"]),
-  messages: new Set(["m1", "m2", "m3", "m4", "m5"]),
-};
 
 /** Đếm số bản ghi mẫu còn lại trong từng mảng — dùng để hiển thị trước khi
  * người dùng xác nhận xoá (xem DataCenterPage), tránh xoá "mù" không biết
@@ -409,6 +401,9 @@ export function countSampleData(): { label: string; count: number }[] {
  * thị (dữ liệu đơn không mất, chỉ mất liên kết hiển thị).
  */
 export function clearSampleData(): void {
+  // Nếu đang ở chế độ THẬT (mẫu đang bị ẩn trong stash), trả mẫu về mảng sống
+  // trước rồi mới lọc — để lọc đúng và xoá hẳn cả phần đang ẩn, không sót.
+  showSampleData();
   replaceArrayContents(orders, orders.filter((o) => !SAMPLE_IDS.orders.has(o.id)));
   replaceArrayContents(customers, customers.filter((c) => !SAMPLE_IDS.customers.has(c.id)));
   replaceArrayContents(concepts, concepts.filter((c) => !SAMPLE_IDS.concepts.has(c.id)));

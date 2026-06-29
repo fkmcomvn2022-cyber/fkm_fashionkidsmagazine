@@ -227,6 +227,19 @@ export default function SettingsPage() {
         </div>
       </Panel>
 
+      <Panel
+        title="Trợ lý AI nội bộ"
+        subtitle="Trợ lý riêng cho anh/chị (khác AI trả lời khách): chat hoặc đọc bằng giọng nói để tạo đơn nhanh, hỏi doanh thu/lịch. Mẹo: bật chế độ DEMO (nút góc trên) để thử tạo đơn an toàn trước khi dùng thật."
+      >
+        <button onClick={() => navigate("/assistant")} className="w-full text-left">
+          <Row
+            icon={<Bot size={16} />}
+            label="Mở Trợ lý AI nội bộ"
+            desc="Tạo đơn bằng chat/giọng nói · hỏi số liệu, lịch, đơn còn nợ"
+          />
+        </button>
+      </Panel>
+
       <Panel title="Thanh toán" subtitle="Tài khoản nhận tiền dùng cho mọi mã QR thu cọc/thu tiền trong app — đổi được, không gắn cứng vào 1 studio">
         <div className="flex flex-col gap-3 py-1">
           <div className="flex items-center gap-3">

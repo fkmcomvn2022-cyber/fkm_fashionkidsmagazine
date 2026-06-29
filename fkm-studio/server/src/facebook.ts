@@ -104,6 +104,70 @@ async function fetchFacebookProfile(
 }
 
 /**
+ * Lấy TÊN khách qua Conversations API — cách lấy tên KHÔNG cần Advanced Access
+ * cho app cá nhân (không qua App Review). KHÔNG gọi /{PSID} (Meta chặn nếu
+ * chưa duyệt), mà hỏi danh sách hội thoại của CHÍNH Trang mình (`me`) lọc theo
+ * `user_id={PSID}`, rồi đọc tên participant trùng PSID. Chạy được với Page
+ * Access Token của Trang mình quản lý + quyền pages_messaging (đã có sẵn cho
+ * webhook). LƯU Ý: API này trả về TÊN, KHÔNG trả avatar — profile_pic vẫn cần
+ * Advanced Access riêng nên app cá nhân gần như không lấy được avatar; ưu tiên
+ * "ít nhất có tên khách" theo yêu cầu. Trả null nếu Facebook từ chối/không có.
+ */
+async function fetchNameFromConversations(psid: string, pageAccessToken: string): Promise<string | null> {
+  if (!pageAccessToken) return null;
+  try {
+    const url = `https://graph.facebook.com/v19.0/me/conversations?platform=messenger&user_id=${encodeURIComponent(psid)}&fields=participants&access_token=${encodeURIComponent(pageAccessToken)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn("[facebook] Conversations API từ chối lấy tên (PSID", psid, "):", await res.text());
+      return null;
+    }
+    const data = (await res.json()) as {
+      data?: { participants?: { data?: { id?: string; name?: string }[] } }[];
+    };
+    for (const convo of data.data ?? []) {
+      // participant.id của khách CHÍNH LÀ PSID -> khớp đúng để lấy tên khách,
+      // không nhầm sang tên Trang (participant còn lại là id của Trang).
+      const me = (convo.participants?.data ?? []).find((p) => p.id === psid);
+      const name = (me?.name ?? "").trim();
+      if (name) return name;
+    }
+    return null;
+  } catch (err) {
+    console.warn("[facebook] Lỗi khi lấy tên qua Conversations API:", err);
+    return null;
+  }
+}
+
+/**
+ * Gom các nguồn lấy tên/avatar khách theo thứ tự ƯU TIÊN từ rẻ/dễ tới khó:
+ *  1) payloadHint — Facebook thi thoảng kèm sẵn sender.name/profile_pic trong
+ *     webhook (đặc biệt kênh standby): dùng luôn, không tốn lượt gọi API.
+ *  2) Conversations API — lấy TÊN không cần Advanced Access (xem
+ *     fetchNameFromConversations).
+ *  3) /{PSID} User Profile API — chỉ thử khi vẫn thiếu; thường bị chặn nếu
+ *     chưa App Review, nhưng đôi khi vẫn ra tên/avatar nên vẫn thử cuối cùng.
+ * Chỉ gọi tới các bước sau khi bước trước chưa đủ (tiết kiệm lượt gọi API).
+ */
+async function resolveCustomerProfile(
+  psid: string,
+  pageAccessToken: string,
+  payloadHint?: { name?: string; avatar?: string },
+): Promise<{ name?: string; avatar?: string }> {
+  let name = payloadHint?.name?.trim() || undefined;
+  let avatar = payloadHint?.avatar || undefined;
+  if (!name) {
+    name = (await fetchNameFromConversations(psid, pageAccessToken)) || undefined;
+  }
+  if (!name || !avatar) {
+    const profile = await fetchFacebookProfile(psid, pageAccessToken);
+    if (!name && profile?.name) name = profile.name;
+    if (!avatar && profile?.avatar) avatar = profile.avatar;
+  }
+  return { name, avatar };
+}
+
+/**
  * Tìm khách theo facebookId (PSID — Page-Scoped ID Facebook gửi kèm mỗi tin)
  * — chưa có thì tạo mới (tag "Mới"), kèm gọi Graph API lấy tên + avatar thật
  * của khách (xem fetchFacebookProfile). Tương đương `findOrCreateCustomer` ở
@@ -133,19 +197,13 @@ export async function findOrCreateCustomerByFacebookId(
     // dần, không bị kẹt vĩnh viễn với "Khách Facebook" như khách tạo trước
     // bản fix này. Ưu tiên payloadHint (free, không qua Graph) trước.
     if (!existing.avatar || existing.name === "Khách Facebook") {
-      if (payloadHint?.name) existing.name = payloadHint.name;
-      if (payloadHint?.avatar) existing.avatar = payloadHint.avatar;
-      if (!existing.avatar || existing.name === "Khách Facebook") {
-        const profile = await fetchFacebookProfile(psid, pageAccessToken);
-        if (profile?.name) existing.name = profile.name;
-        if (profile?.avatar) existing.avatar = profile.avatar;
-      }
+      const profile = await resolveCustomerProfile(psid, pageAccessToken, payloadHint);
+      if (profile.name) existing.name = profile.name;
+      if (profile.avatar) existing.avatar = profile.avatar;
     }
     return existing;
   }
-  const profile = payloadHint?.name || payloadHint?.avatar
-    ? payloadHint
-    : await fetchFacebookProfile(psid, pageAccessToken);
+  const profile = await resolveCustomerProfile(psid, pageAccessToken, payloadHint);
   const customer: CustomerShape = {
     // BUG (2026-06-28, vòng 2): trước đây dùng nextId("fbu", customers) — đếm
     // tăng dần dựa trên DANH SÁCH KHÁCH HIỆN CÓ TRÊN SERVER. Nhưng Render free

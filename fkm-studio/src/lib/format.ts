@@ -12,35 +12,61 @@ export function formatVNDShort(n: number): string {
 
 const weekdayLabels = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
+// ---------------------------------------------------------------------------
+// LƯU Ý QUAN TRỌNG (lỗi treo trắng app ở múi giờ Việt Nam — đã sửa 29/06/2026):
+// Mọi phép tính ngày dạng "yyyy-mm-dd" ở đây làm CHUẨN HOÁ theo UTC, KHÔNG bao
+// giờ trộn `new Date(iso + "T00:00:00")` (đọc theo giờ LOCAL của máy) với
+// `.toISOString()` (xuất theo giờ UTC). Trước đây cách cũ làm như vậy: ở UTC+7,
+// new Date("2026-06-29T00:00:00") là 0h GIỜ VN = 17h hôm trước theo UTC, nên
+// addDays(...,+1) cộng 1 ngày LOCAL rồi đổi về UTC lại RƠI ĐÚNG NGÀY CŨ ->
+// chuỗi ngày KHÔNG tăng -> vòng lặp `for (d=start; d<=end; d=addDays(d,1))` ở
+// WeekCalendar chạy vô hạn -> treo cứng trình duyệt/app (cả web, Mac, Android,
+// vì máy người dùng đều ở UTC+7). Máy chạy ở UTC không bao giờ tái hiện được.
+// Giải pháp: parse trực tiếp y/m/d và dùng Date.UTC + getUTC*/setUTCDate để
+// phép cộng/trừ ngày luôn nhất quán, không phụ thuộc múi giờ máy.
+// ---------------------------------------------------------------------------
+
+/** Tạo 1 Date "neo" vào 0h UTC của đúng ngày yyyy-mm-dd (không lệ thuộc múi giờ máy). */
+function utcDateFromIso(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
 export function formatDateShort(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const [, m, d] = iso.split("-");
+  return `${d}/${m}`;
 }
 
 export function weekdayLabel(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  return weekdayLabels[d.getDay()];
+  return weekdayLabels[utcDateFromIso(iso).getUTCDay()];
 }
 
 export function addDays(iso: string, days: number): string {
-  const d = new Date(iso + "T00:00:00");
-  d.setDate(d.getDate() + days);
+  const d = utcDateFromIso(iso);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
 /** Thứ 2 (đầu tuần) của tuần chứa `iso` — dùng để tính dải 7 ngày hiển thị ở
  * Lịch ca chụp theo TUẦN ĐANG XEM (date), thay vì 1 tuần cố định cứng. */
 export function startOfWeekIso(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  const day = d.getDay(); // 0 = CN
+  const d = utcDateFromIso(iso);
+  const day = d.getUTCDay(); // 0 = CN
   const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
+  d.setUTCDate(d.getUTCDate() + diff);
   return d.toISOString().slice(0, 10);
 }
 
-/** Ngày hôm nay theo giờ máy người dùng, dạng ISO (yyyy-mm-dd). */
+/** Ngày hôm nay theo lịch của máy người dùng, dạng ISO (yyyy-mm-dd). Dùng các
+ * thành phần ngày LOCAL (không qua toISOString) để ở UTC+7 vẫn ra đúng "hôm
+ * nay" theo giờ VN, rồi mọi phép tính tiếp theo (addDays/startOfWeekIso) xử lý
+ * chuỗi này nhất quán theo UTC. */
 export function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 export function isSameDate(a: string, b: string): boolean {

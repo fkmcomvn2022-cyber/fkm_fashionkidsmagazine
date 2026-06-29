@@ -1,7 +1,9 @@
 import { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Bot, Send, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Bot, Send, Loader2, Sparkles, Mic, MicOff } from "lucide-react";
 import { BACKEND_URL } from "@/lib/persistence";
+import { useAppState } from "@/lib/appState";
+import { createOrderFromAi, type AiOrderArgs } from "@/lib/aiCreateOrder";
 
 /**
  * Giai đoạn 8 (xem [[fkm-studio-ai-chatbot-roadmap]]) — trợ lý AI NỘI BỘ, chủ
@@ -19,23 +21,49 @@ interface AssistantMessage {
 }
 
 const SUGGESTIONS = [
+  "Tạo đơn cho chị Lan, concept Thu Mơ, 9h sáng mai, 1 bé",
   "Doanh thu tuần này bao nhiêu?",
   "Lịch sắp tới 7 ngày có gì?",
   "Đơn nào còn nợ tiền?",
-  "Concept nào bán tốt nhất tháng này?",
 ];
+
+// Web Speech API chưa nằm sẵn trong type mặc định của TS — khai báo tối thiểu.
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
 
 export default function AssistantPage() {
   const navigate = useNavigate();
+  const { bumpDataVersion } = useAppState();
   const [messages, setMessages] = useState<AssistantMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const speechSupported = typeof window !== "undefined" && getSpeechRecognitionCtor() !== null;
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, sending]);
+
+  // Dọn nhận diện giọng nói khi rời màn.
+  useEffect(() => () => recognitionRef.current?.stop(), []);
 
   const send = async (text: string) => {
     const trimmed = text.trim();
@@ -51,7 +79,12 @@ export default function AssistantPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ history: nextHistory }),
       });
-      const json = (await res.json()) as { ok: boolean; reply?: string; error?: string };
+      const json = (await res.json()) as {
+        ok: boolean;
+        reply?: string;
+        error?: string;
+        action?: { type: string; args?: AiOrderArgs };
+      };
       if (!json.ok || !json.reply) {
         setError(
           json.error === "no_reply"
@@ -60,12 +93,50 @@ export default function AssistantPage() {
         );
         return;
       }
+      // AI muốn tạo đơn -> thực thi ngay phía client (tự lưu), rồi báo kết quả
+      // thật (mã đơn) thay cho câu chung chung của AI.
+      if (json.action?.type === "create_order" && json.action.args) {
+        const outcome = createOrderFromAi(json.action.args);
+        if (outcome.ok) bumpDataVersion();
+        setMessages([...nextHistory, { fromOwner: false, text: outcome.message }]);
+        return;
+      }
       setMessages([...nextHistory, { fromOwner: false, text: json.reply }]);
     } catch {
       setError("Không kết nối được tới server — kiểm tra mạng hoặc thử lại.");
     } finally {
       setSending(false);
     }
+  };
+
+  const toggleMic = () => {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) {
+      setError("Thiết bị/trình duyệt này chưa hỗ trợ nhập giọng nói. Anh/chị gõ chữ giúp em nha.");
+      return;
+    }
+    const recog = new Ctor();
+    recognitionRef.current = recog;
+    recog.lang = "vi-VN";
+    recog.interimResults = false;
+    recog.continuous = false;
+    recog.onresult = (e) => {
+      const transcript = e.results?.[0]?.[0]?.transcript ?? "";
+      if (transcript) {
+        setDraft(transcript);
+        // Đọc xong tự gửi luôn cho nhanh (theo yêu cầu: đọc -> AI tự thêm).
+        void send(transcript);
+      }
+    };
+    recog.onerror = () => setListening(false);
+    recog.onend = () => setListening(false);
+    setError(null);
+    setListening(true);
+    recog.start();
   };
 
   return (
@@ -79,7 +150,7 @@ export default function AssistantPage() {
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-[14px] font-bold text-ink">Trợ lý AI nội bộ</p>
-          <p className="text-[11px] text-muted">Hỏi nhanh về doanh thu, lịch, nhân sự, khách hàng</p>
+          <p className="text-[11px] text-muted">Hỏi số liệu, hoặc bảo em tạo đơn (gõ/đọc mic) — tự lưu</p>
         </div>
       </div>
 
@@ -88,7 +159,7 @@ export default function AssistantPage() {
           <div className="flex flex-col gap-2 mt-2">
             <div className="rounded-2xl bg-surface-soft text-ink-soft px-3.5 py-2.5 text-[13px] flex items-start gap-2">
               <Sparkles size={14} className="text-brand-blue shrink-0 mt-0.5" />
-              <span>Em là trợ lý AI nội bộ, anh/chị hỏi em về doanh thu, lịch sắp tới, đơn còn nợ tiền, nhân sự, hoặc tra khách hàng cụ thể nha.</span>
+              <span>Em là trợ lý AI nội bộ. Anh/chị có thể hỏi em về doanh thu, lịch, đơn còn nợ, nhân sự, khách hàng — hoặc bảo em <b>tạo đơn</b> (gõ hoặc bấm mic đọc), em tự tạo và lưu luôn nha.</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {SUGGESTIONS.map((s) => (
@@ -127,6 +198,18 @@ export default function AssistantPage() {
       {error && <p className="text-[11px] text-danger text-center mb-1.5">{error}</p>}
 
       <div className="flex items-end gap-2 sticky bottom-0 bg-canvas pt-1">
+        {speechSupported && (
+          <button
+            onClick={toggleMic}
+            disabled={sending}
+            aria-label={listening ? "Dừng nghe" : "Đọc bằng giọng nói"}
+            className={`w-10 h-10 rounded-full flex items-center justify-center tap-scale shrink-0 disabled:opacity-50 ${
+              listening ? "bg-danger text-white animate-pulse" : "bg-surface-soft text-ink-soft"
+            }`}
+          >
+            {listening ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
+        )}
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -136,7 +219,7 @@ export default function AssistantPage() {
               send(draft);
             }
           }}
-          placeholder="Hỏi trợ lý AI..."
+          placeholder={listening ? "Đang nghe... anh/chị nói đi" : "Hỏi trợ lý AI, hoặc đọc lệnh tạo đơn..."}
           rows={1}
           className="flex-1 rounded-2xl border border-border-soft bg-surface px-3.5 py-2.5 text-[13px] text-ink outline-none focus:border-brand-blue resize-none"
         />

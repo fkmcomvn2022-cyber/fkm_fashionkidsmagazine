@@ -9,6 +9,23 @@ export function ConceptBanner() {
   const { activeConceptId, setActiveConceptId } = useAppState();
   const [open, setOpen] = useState(false);
   const concept = concepts.find((c) => c.id === activeConceptId) ?? concepts[0];
+
+  // Trạng thái RỖNG: chưa có concept nào (vd. đang ở chế độ THẬT/đã xoá dữ liệu
+  // mẫu mà chưa tạo concept thật). Trước đây thiếu nhánh này nên `concept` =
+  // undefined -> đọc concept.color/.id làm trắng cả app. Hiện chặn an toàn,
+  // hiện ô mời tạo concept thay vì crash.
+  if (!concept) {
+    return (
+      <div className="rounded-3xl p-4 shadow-card border border-border-soft bg-surface text-center">
+        <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold text-muted uppercase tracking-wide">
+          <Sparkles size={12} />
+          Concept điều hành
+        </div>
+        <p className="text-[13px] text-ink-soft mt-1.5">Chưa có concept nào. Thêm concept (gói chụp) để bắt đầu nhận đơn.</p>
+      </div>
+    );
+  }
+
   const ordersThisMonth = orders.filter((o) => o.conceptId === concept.id).length;
   const revenue = orders.filter((o) => o.conceptId === concept.id).reduce((s, o) => s + o.total, 0);
 
