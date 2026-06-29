@@ -18,7 +18,7 @@ import { describeOpenWindows, getSuggestedHours, formatHourSuggestionsReply } fr
 import { useAppState } from "@/lib/appState";
 import { BACKEND_URL } from "@/lib/persistence";
 import { fileToThumbnailDataUrl } from "@/lib/imageThumb";
-import { customerAvatarSrc } from "@/lib/avatar";
+import { customerAvatarSrc, chatImageSrc } from "@/lib/avatar";
 import type { Message } from "@/types";
 
 const templates = [
@@ -525,8 +525,8 @@ export default function ChatPage() {
             >
               {m.imageUrl && (
                 <img
-                  src={m.imageUrl}
-                  alt="Ảnh đã gửi"
+                  src={chatImageSrc(m.imageUrl)}
+                  alt="Ảnh"
                   className="rounded-xl max-w-full max-h-60 object-cover mb-1"
                   loading="lazy"
                 />

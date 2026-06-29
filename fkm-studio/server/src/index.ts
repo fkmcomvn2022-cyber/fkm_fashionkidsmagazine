@@ -631,7 +631,16 @@ async function handleFacebookWebhookPayload(body: unknown): Promise<void> {
       console.warn("[facebook webhook] Bỏ qua 1 tin không có nội dung nhận diện được (psid:", msg.psid, "):", JSON.stringify(msg));
       continue;
     }
-    appendMessage(state, { customerId: customer.id ?? "", channel: "facebook", fromCustomer: true, text });
+    // Lưu kèm link ảnh khách gửi (attachmentUrls[0]) để hiện lại trong hội
+    // thoại — client sẽ hiển thị qua proxy /api/fb-image (link CDN Facebook bị
+    // chặn/hết hạn nếu nhúng thẳng vào <img> trên web).
+    appendMessage(state, {
+      customerId: customer.id ?? "",
+      channel: "facebook",
+      fromCustomer: true,
+      text,
+      imageUrl: hasImage ? msg.attachmentUrls[0] : undefined,
+    });
     await sendPushToAll({
       title: `Tin nhắn mới từ ${customer.name ?? "khách"}`,
       body: text.length > 80 ? `${text.slice(0, 80)}...` : text,
@@ -928,6 +937,46 @@ app.get("/api/avatar/:psid", async (req, res) => {
     res.end(buf);
   } catch (err) {
     console.warn("[facebook] Lỗi proxy avatar (PSID", psid, "):", err);
+    res.status(404).end();
+  }
+});
+
+// PROXY ảnh đính kèm khách gửi qua Messenger (link CDN Facebook hay bị chặn
+// hotlink/CORS/hết hạn khi nhúng thẳng vào <img> trên web). Server tải hộ rồi
+// stream về. CHẶN SSRF: chỉ cho phép tải URL thuộc domain Facebook/CDN, không
+// cho proxy URL tùy ý (tránh bị lợi dụng quét mạng nội bộ).
+function isAllowedFacebookImageHost(host: string): boolean {
+  return (
+    host === "facebook.com" ||
+    host.endsWith(".facebook.com") ||
+    host.endsWith(".fbcdn.net") ||
+    host.endsWith(".fbsbx.com")
+  );
+}
+app.get("/api/fb-image", async (req, res) => {
+  const raw = typeof req.query.url === "string" ? req.query.url : "";
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || (parsed.protocol !== "https:" && parsed.protocol !== "http:") || !isAllowedFacebookImageHost(parsed.hostname)) {
+    res.status(400).end();
+    return;
+  }
+  try {
+    const imgRes = await fetch(parsed.toString());
+    if (!imgRes.ok) {
+      res.status(404).end();
+      return;
+    }
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    res.setHeader("Content-Type", imgRes.headers.get("content-type") ?? "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.end(buf);
+  } catch (err) {
+    console.warn("[fb-image] Lỗi proxy ảnh:", err);
     res.status(404).end();
   }
 });
